@@ -1,0 +1,51 @@
+---
+description: Контекст проекта Control Habits — домен, модули, стек, ссылки на документацию
+globs: **/*.py, **/pyproject.toml, **/requirements*.txt, plan.md, AGENTS.md
+alwaysApply: false
+---
+
+# Control Habits — контекст проекта
+
+## Назначение
+
+Сервис для трекинга дел и привычек: веб — настройка расписания и кнопок; Telegram-бот — пуши по расписанию и быстрые кнопки (старт/стоп интервалов). Python-стек.
+
+## Документация (источник истины)
+
+- **План и спека**: `plan.md`
+- **Вся детальная документация**: папка `docs/`
+  - `docs/index.md` — оглавление
+  - `docs/requirements.md` — функциональные/нефункциональные требования, граничные случаи (время, идемпотентность, Telegram)
+  - `docs/domain-model.md` — сущности (User, ScheduleTemplate, PlanItem/TaskItem/EventItem, Activity, Hotkey, Notification, LogEntry, ActiveSession, LinkCode), состояния событий
+  - `docs/system-design.md` — архитектура (Web API, Bot Service, Scheduler), потоки, схема БД, планировщик (APScheduler для MVP)
+  - `docs/modules.md` — разбиение на модули с интерфейсами и **порядком реализации**
+- **Организация работы и агенты**: `AGENTS.md`
+
+При реализации и ревью опираться на эти файлы.
+
+## Модули (порядок реализации)
+
+1. **storage** — модели SQLAlchemy, Alembic, репозитории (UsersRepo, LinkCodesRepo, ScheduleRepo, ActivityRepo, HotkeysRepo, NotificationsRepo, LogsRepo, SessionsRepo)
+2. **auth_linking** — create_link_code, consume_link_code; интеграция с API и ботом
+3. **schedule_model** — DTO, expand_template(user_id, date) → list[PlannedItem]
+4. **planning_engine** — build_notification_jobs, idempotency_key
+5. **bot_messages** — сборка текстов и клавиатур (лимит callback_data 64 байта)
+6. **hotkey_sessions** — start_session, stop_session, list_active_sessions
+7. **bot_handlers** — обработка callback, /start, /active; идемпотентность
+8. **reporting** — get_daily_report
+9. **scheduler** — выборка pending, отправка пушей, mark_sent
+
+## Стек
+
+- Web/API: FastAPI, Pydantic, Uvicorn
+- DB: SQLAlchemy 2.x, Alembic, PostgreSQL (psycopg/asyncpg)
+- Bot: aiogram 3.x
+- Планировщик: APScheduler (MVP)
+- Конфиг: pydantic-settings
+- Логи: structlog или logging + JSON
+
+## Важные договорённости
+
+- Время в БД — UTC; у пользователя — timezone (IANA). Расписание в локальном времени, расчёт через zoneinfo.
+- Идемпотентность: ответы на пуши и hotkey не создают дубликатов; callback_data содержит ключ/notification_id, проверка перед записью LogEntry.
+- Python: объединения `T | None`, встроенные коллекции `list[T]`, `dict[K, V]`; докстринги reStructuredText на русском (:param, :returns).
