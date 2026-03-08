@@ -1,0 +1,10 @@
+Alembic — миграции БД для control-habits.
+
+Все даты/времена в БД хранятся в UTC.
+
+Перед запуском миграций задайте DATABASE_URL или настройте sqlalchemy.url в alembic.ini.
+
+Команды:
+  alembic upgrade head   — применить все миграции
+  alembic downgrade -1   — откатить одну ревизию
+  alembic current       — текущая ревизия
