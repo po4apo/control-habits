@@ -1,19 +1,34 @@
-"""Обработка нажатий hotkey-кнопок: start_session/stop_session, LogEntry, ответ пользователю."""
+"""Обработка нажатий hotkey-кнопок и меню «Горячие клавиши»: start_session/stop_session, LogEntry, ответ пользователю."""
 
 from collections.abc import Callable
 from datetime import datetime, timezone
-
 from aiogram import Router
 from aiogram.filters import Filter
-from aiogram.types import CallbackQuery
+from aiogram.types import CallbackQuery, Message
 from sqlalchemy.orm import Session
 
-from control_habits.bot_messages.types import CALLBACK_PREFIX_HOTKEY
+from control_habits.bot_messages import build_hotkeys_keyboard, HOTKEYS_MENU_LABEL
+from control_habits.bot_messages.types import (
+    CALLBACK_PREFIX_HOTKEY,
+    CALLBACK_PREFIX_HOTKEYS_MENU,
+)
 from control_habits.hotkey_sessions import start_session, stop_session
 from control_habits.storage.repositories.activity import ActivityRepo
+from control_habits.storage.repositories.hotkeys import HotkeysRepo
 from control_habits.storage.repositories.logs import LogsRepo
 from control_habits.storage.repositories.sessions import SessionsRepo
 from control_habits.storage.repositories.users import UsersRepo
+
+MSG_HOTKEYS_CHOOSE = "Выберите событие:"
+
+
+class HotkeysMenuCallbackFilter(Filter):
+    """Фильтр: callback_data — кнопка «Горячие клавиши» (hkmenu_)."""
+
+    async def __call__(self, callback: CallbackQuery) -> bool:
+        if not callback.data:
+            return False
+        return callback.data == CALLBACK_PREFIX_HOTKEYS_MENU
 
 
 class HotkeyCallbackFilter(Filter):
@@ -59,18 +74,78 @@ def setup_hotkey_handler(
         [],
         tuple[UsersRepo, SessionsRepo, ActivityRepo, LogsRepo, Session],
     ],
+    get_keyboard_deps: Callable[
+        [],
+        tuple[UsersRepo, HotkeysRepo, ActivityRepo, Session],
+    ]
+    | None = None,
 ) -> None:
     """
-    Регистрирует обработчик callback_query для hotkey-кнопок.
+    Регистрирует обработчик callback_query для hotkey-кнопок и меню «Горячие клавиши».
 
-    Логика: если активной сессии по активности нет — start_session, LogEntry session_start;
+    Логика hotkey: если активной сессии по активности нет — start_session, LogEntry session_start;
     иначе — stop_session, LogEntry session_end. Ответ пользователю с названием активности.
-    Идемпотентность: start_session возвращает существующий id при повторном старте;
-    stop_session возвращает None при повторном стопе — запись LogEntry только при реальном действии.
+    Логика hkmenu_: отправить сообщение с клавиатурой только горячих кнопок (без «Что включено»).
 
     :param router: Роутер aiogram.
     :param get_deps: Функция, возвращающая (UsersRepo, SessionsRepo, ActivityRepo, LogsRepo, Session).
+    :param get_keyboard_deps: Функция для сборки клавиатуры горячих клавиш (для hkmenu_); при None меню не регистрируется.
     """
+
+    if get_keyboard_deps is not None:
+
+        @router.message(lambda m: m.text and m.text.strip() == HOTKEYS_MENU_LABEL)
+        async def on_hotkeys_menu_message(message: Message) -> None:
+            """По нажатию Reply-кнопки «Горячие клавиши»: сообщение «Выберите событие» и inline-клавиатура hotkeys."""
+            telegram_user_id = message.from_user.id if message.from_user else 0
+            users_repo, hotkeys_repo, activity_repo, session = get_keyboard_deps()
+            try:
+                user = users_repo.get_by_telegram_id(telegram_user_id)
+                if user is None:
+                    await message.answer(
+                        "Сначала привяжи аккаунт через /start.",
+                    )
+                    return
+                keyboard = build_hotkeys_keyboard(
+                    user.id,
+                    hotkeys_repo,
+                    activity_repo,
+                    include_active_button=False,
+                )
+                await message.answer(
+                    MSG_HOTKEYS_CHOOSE,
+                    reply_markup=keyboard,
+                )
+            finally:
+                session.close()
+
+        @router.callback_query(HotkeysMenuCallbackFilter())
+        async def on_hotkeys_menu_callback(callback: CallbackQuery) -> None:
+            """По нажатию «Горячие клавиши»: сообщение «Выберите событие» и клавиатура только hotkeys."""
+            telegram_user_id = callback.from_user.id if callback.from_user else 0
+            users_repo, hotkeys_repo, activity_repo, session = get_keyboard_deps()
+            try:
+                user = users_repo.get_by_telegram_id(telegram_user_id)
+                if user is None:
+                    await callback.answer(
+                        "Сначала привяжи аккаунт через /start.",
+                        show_alert=True,
+                    )
+                    return
+                keyboard = build_hotkeys_keyboard(
+                    user.id,
+                    hotkeys_repo,
+                    activity_repo,
+                    include_active_button=False,
+                )
+                await callback.answer()
+                if callback.message:
+                    await callback.message.answer(
+                        MSG_HOTKEYS_CHOOSE,
+                        reply_markup=keyboard,
+                    )
+            finally:
+                session.close()
 
     @router.callback_query(HotkeyCallbackFilter())
     async def on_hotkey_callback(callback: CallbackQuery) -> None:
@@ -92,7 +167,7 @@ def setup_hotkey_handler(
 
             activity = activity_repo.get_by_id(activity_id)
             if activity is None or activity.user_id != user.id:
-                await callback.answer("Активность не найдена.", show_alert=True)
+                await callback.answer("Событие не найдено.", show_alert=True)
                 return
 
             now = datetime.now(timezone.utc)
@@ -113,7 +188,7 @@ def setup_hotkey_handler(
                     activity_id=activity_id,
                 )
                 session.commit()
-                await callback.answer(f"Сессия «{activity_name}» начата.", show_alert=False)
+                await callback.answer(f"{activity_name} включено.", show_alert=False)
             else:
                 duration = stop_session(
                     sessions_repo=sessions_repo,
@@ -131,9 +206,9 @@ def setup_hotkey_handler(
                     )
                 session.commit()
                 if duration is not None:
-                    text = f"Сессия «{activity_name}» закончена ({_format_duration_minutes(duration)})."
+                    text = f"{activity_name} выключено (шло {_format_duration_minutes(duration)})."
                 else:
-                    text = f"Сессия «{activity_name}» уже была закончена."
+                    text = f"{activity_name} уже было выключено."
                 await callback.answer(text, show_alert=False)
         except Exception:
             session.rollback()

@@ -94,3 +94,48 @@ class LogsRepo:
             .order_by(LogEntry.responded_at)
         )
         return list(self._session.scalars(stmt).all())
+
+    def list_planned_events_in_progress(
+        self,
+        user_id: int,
+        utc_from_inclusive: datetime,
+        utc_to_exclusive: datetime,
+    ) -> list[tuple[int, datetime]]:
+        """
+        Запланированные события (из расписания), которые «начаты» и ещё не «закончены» в интервале.
+
+        Ищет event_started с plan_item_id за период; исключает plan_item_id, по которым
+        есть event_ended или event_skipped в том же периоде.
+
+        :param user_id: Идентификатор пользователя.
+        :param utc_from_inclusive: Начало интервала (UTC, включительно).
+        :param utc_to_exclusive: Конец интервала (UTC, не включительно).
+        :returns: Список пар (plan_item_id, started_at), где started_at — responded_at записи event_started.
+        """
+        started = (
+            select(LogEntry.plan_item_id, LogEntry.responded_at)
+            .where(LogEntry.user_id == user_id)
+            .where(LogEntry.responded_at >= utc_from_inclusive)
+            .where(LogEntry.responded_at < utc_to_exclusive)
+            .where(LogEntry.action == "event_started")
+            .where(LogEntry.plan_item_id.isnot(None))
+        )
+        started_rows = list(self._session.execute(started).all())
+
+        ended_plan_ids = set(
+            self._session.scalars(
+                select(LogEntry.plan_item_id)
+                .where(LogEntry.user_id == user_id)
+                .where(LogEntry.responded_at >= utc_from_inclusive)
+                .where(LogEntry.responded_at < utc_to_exclusive)
+                .where(LogEntry.action.in_(["event_ended", "event_skipped"]))
+                .where(LogEntry.plan_item_id.isnot(None))
+                .distinct()
+            ).all()
+        )
+
+        return [
+            (int(plan_item_id), responded_at)
+            for plan_item_id, responded_at in started_rows
+            if plan_item_id is not None and plan_item_id not in ended_plan_ids
+        ]

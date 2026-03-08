@@ -21,9 +21,11 @@ from control_habits.bot.start_handler import setup_start_handler
 from control_habits.config import Settings
 from control_habits.scheduler import PushSchedulerService
 from control_habits.storage.repositories.activity import ActivityRepo
+from control_habits.storage.repositories.hotkeys import HotkeysRepo
 from control_habits.storage.repositories.link_codes import LinkCodesRepo
 from control_habits.storage.repositories.logs import LogsRepo
 from control_habits.storage.repositories.notifications import NotificationsRepo
+from control_habits.storage.repositories.schedule import ScheduleRepo
 from control_habits.storage.repositories.sessions import SessionsRepo
 from control_habits.storage.repositories.users import UsersRepo
 
@@ -82,6 +84,28 @@ def run_polling() -> None:
         logs_repo = LogsRepo(session)
         return users_repo, sessions_repo, activity_repo, logs_repo, session
 
+    def get_active_deps() -> tuple[
+        UsersRepo, SessionsRepo, ActivityRepo, LogsRepo, ScheduleRepo, Session
+    ]:
+        """Репозитории для «Что включено» (hotkey-сессии + запланированные события в процессе)."""
+        session = session_factory()
+        users_repo = UsersRepo(session)
+        sessions_repo = SessionsRepo(session)
+        activity_repo = ActivityRepo(session)
+        logs_repo = LogsRepo(session)
+        schedule_repo = ScheduleRepo(session)
+        return users_repo, sessions_repo, activity_repo, logs_repo, schedule_repo, session
+
+    def get_keyboard_deps() -> tuple[
+        UsersRepo, HotkeysRepo, ActivityRepo, Session
+    ]:
+        """Репозитории для сборки клавиатуры hotkeys (start, fallback)."""
+        session = session_factory()
+        users_repo = UsersRepo(session)
+        hotkeys_repo = HotkeysRepo(session)
+        activity_repo = ActivityRepo(session)
+        return users_repo, hotkeys_repo, activity_repo, session
+
     bot = Bot(
         token=settings.bot_token,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
@@ -91,12 +115,13 @@ def run_polling() -> None:
     setup_start_handler(
         router,
         get_auth_service=get_auth_service,
+        get_keyboard_deps=get_keyboard_deps,
         web_app_url=settings.web_app_url,
     )
     setup_push_callback_handler(router, get_push_callback_deps)
-    setup_hotkey_handler(router, get_session_deps)
-    setup_active_handler(router, get_session_deps)
-    setup_fallback_handler(router)  # последним: ловит необработанные message/callback
+    setup_hotkey_handler(router, get_session_deps, get_keyboard_deps=get_keyboard_deps)
+    setup_active_handler(router, get_active_deps)
+    setup_fallback_handler(router, get_keyboard_deps=get_keyboard_deps)
     dp.include_router(router)
 
     # Планировщик пушей в фоновом потоке (get_pending_locked, отправка, mark_sent)

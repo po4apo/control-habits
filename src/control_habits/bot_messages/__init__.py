@@ -1,9 +1,14 @@
 # bot_messages — сборка текстов и клавиатур для Telegram (лимит callback_data 64 байта)
 
 from control_habits.bot_messages.hotkeys import (
+    build_active_sessions_buttons,
     build_active_sessions_message,
     build_finish_buttons,
     build_hotkeys_keyboard,
+    build_main_menu_keyboard,
+    build_main_menu_reply_keyboard,
+    build_session_detail_message,
+    HOTKEYS_MENU_LABEL,
 )
 from control_habits.bot_messages.prompts import (
     build_event_end_prompt,
@@ -11,33 +16,48 @@ from control_habits.bot_messages.prompts import (
     build_task_prompt,
 )
 from control_habits.bot_messages.types import (
+    CALLBACK_PREFIX_ACTIVE_DETAIL,
+    CALLBACK_PREFIX_ACTIVE_DETAIL_PLAN,
     CALLBACK_PREFIX_EVENT_ENDED,
     CALLBACK_PREFIX_EVENT_NOT_STARTED,
     CALLBACK_PREFIX_EVENT_SKIPPED,
     CALLBACK_PREFIX_EVENT_STARTED,
     CALLBACK_PREFIX_FINISH,
+    CALLBACK_PREFIX_FINISH_PLAN,
     CALLBACK_PREFIX_HOTKEY,
+    CALLBACK_PREFIX_HOTKEYS_MENU,
     CALLBACK_PREFIX_TASK_DONE,
     CALLBACK_PREFIX_TASK_NOT_DONE,
     CALLBACK_PREFIX_TASK_SKIP,
     ActiveSession,
+    CurrentlyOnItem,
 )
 
 __all__ = [
     "ActiveSession",
+    "CurrentlyOnItem",
+    "CALLBACK_PREFIX_ACTIVE_DETAIL",
+    "CALLBACK_PREFIX_ACTIVE_DETAIL_PLAN",
     "CALLBACK_PREFIX_EVENT_ENDED",
     "CALLBACK_PREFIX_EVENT_NOT_STARTED",
     "CALLBACK_PREFIX_EVENT_SKIPPED",
     "CALLBACK_PREFIX_EVENT_STARTED",
     "CALLBACK_PREFIX_FINISH",
+    "CALLBACK_PREFIX_FINISH_PLAN",
     "CALLBACK_PREFIX_HOTKEY",
+    "CALLBACK_PREFIX_HOTKEYS_MENU",
     "CALLBACK_PREFIX_TASK_DONE",
     "CALLBACK_PREFIX_TASK_NOT_DONE",
     "CALLBACK_PREFIX_TASK_SKIP",
+    "build_active_sessions_buttons",
     "build_active_sessions_message",
     "build_event_end_prompt",
     "build_event_start_prompt",
     "build_finish_buttons",
     "build_hotkeys_keyboard",
+    "build_main_menu_keyboard",
+    "build_main_menu_reply_keyboard",
+    "build_session_detail_message",
+    "HOTKEYS_MENU_LABEL",
     "build_task_prompt",
 ]
