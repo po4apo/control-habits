@@ -14,6 +14,7 @@ COPY pyproject.toml ./
 COPY src ./src
 COPY alembic.ini ./
 COPY alembic ./alembic
+COPY static ./static
 
 RUN uv sync --no-dev
 
