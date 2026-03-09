@@ -23,8 +23,8 @@ class Settings(BaseSettings):
     bot_username: str = "Po4aPo_bot"
     """Имя бота в Telegram (без @) для ссылки t.me/<bot_username>?start=<code>."""
 
-    bot_token: str = "1049705065:AAEvR8drXigqMY1j9Hw_D1U3KLVUIxQprfE"
-    """Токен бота Telegram (для процесса бота)."""
+    bot_token: str = ""
+    """Токен бота Telegram (для процесса бота). Задаётся через окружение (BOT_TOKEN)."""
 
     web_app_url: str = ""
     """URL веб-приложения для текста онбординга в боте (например https://app.example.com)."""

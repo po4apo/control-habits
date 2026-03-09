@@ -14,6 +14,8 @@
 | [UI: Telegram](ui-telegram.md) | Схемы экранов и клавиатур бота |
 | [UI: Веб](ui-web.md) | Схемы страниц веб-приложения |
 | [Промпты по подзадачам](prompts.md) | Готовые формулировки для агентов и чата по каждой подзадаче |
+| [CI/CD](ci-deploy/ci-cd.md) | Branch protection, ручной релиз |
+| [Деплой](ci-deploy/deploy.md) | Docker Compose на прод, секреты, миграции Alembic |
 
 ## Расположение
 

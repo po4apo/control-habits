@@ -1,0 +1,23 @@
+# Прод: только API и бот (БД внешняя).
+# В .env задать: IMAGE_OWNER (GitHub org/user), COMPOSE_IMAGE_TAG (например v0.1.0), DATABASE_URL, BOT_TOKEN.
+# Запуск: docker compose -f docker-compose.prod.yml up -d
+
+services:
+  api:
+    image: ghcr.io/${IMAGE_OWNER}/control-habits-api:${COMPOSE_IMAGE_TAG:-latest}
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+    env_file:
+      - .env
+
+  bot:
+    image: ghcr.io/${IMAGE_OWNER}/control-habits-bot:${COMPOSE_IMAGE_TAG:-latest}
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      BOT_TOKEN: ${BOT_TOKEN}
+      WEB_APP_URL: ${WEB_APP_URL:-}
+      BOT_USERNAME: ${BOT_USERNAME:-}
+    env_file:
+      - .env
