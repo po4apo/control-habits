@@ -2,12 +2,16 @@
 
 from control_habits.hotkey_sessions.service import (
     list_active_sessions,
+    pause_session,
+    resume_session,
     start_session,
     stop_session,
 )
 
 __all__ = [
     "list_active_sessions",
+    "pause_session",
+    "resume_session",
     "start_session",
     "stop_session",
 ]

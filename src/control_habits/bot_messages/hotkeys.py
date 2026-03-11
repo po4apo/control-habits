@@ -19,6 +19,8 @@ from control_habits.bot_messages.types import (
     CALLBACK_PREFIX_FINISH_PLAN,
     CALLBACK_PREFIX_HOTKEY,
     CALLBACK_PREFIX_HOTKEYS_MENU,
+    CALLBACK_PREFIX_PAUSE_PLAN,
+    CALLBACK_PREFIX_RESUME_PLAN,
     ActiveSession,
     CurrentlyOnItem,
 )
@@ -86,16 +88,17 @@ def build_active_sessions_buttons(items: list[CurrentlyOnItem]) -> InlineKeyboar
     buttons: list[list[InlineKeyboardButton]] = []
     for it in items:
         time_str = it.started_at.strftime("%H:%M")
-        if it.session_id is not None:
-            callback_data = f"{CALLBACK_PREFIX_ACTIVE_DETAIL}{it.session_id}"
-        else:
+        if it.plan_item_id is not None:
             callback_data = f"{CALLBACK_PREFIX_ACTIVE_DETAIL_PLAN}{it.plan_item_id}"
+        else:
+            callback_data = f"{CALLBACK_PREFIX_ACTIVE_DETAIL}{it.session_id}"
         if not _callback_fits(callback_data):
             continue
+        prefix = "⏸ " if it.is_paused else ""
         buttons.append(
             [
                 InlineKeyboardButton(
-                    text=f"{it.title} (с {time_str})",
+                    text=f"{prefix}{it.title} (с {time_str})",
                     callback_data=callback_data,
                 )
             ]
@@ -103,15 +106,27 @@ def build_active_sessions_buttons(items: list[CurrentlyOnItem]) -> InlineKeyboar
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
-def build_session_detail_message(activity_name: str, started_at: datetime) -> str:
+def build_session_detail_message(
+    activity_name: str,
+    started_at: datetime,
+    is_paused: bool = False,
+    paused_at: datetime | None = None,
+) -> str:
     """
-    Текст детали сессии: «Событие {activity_name} идёт с HH:MM».
+    Текст детали сессии.
 
     :param activity_name: Название активности.
-    :param started_at: Время начала (datetime, будет отформатировано как HH:MM).
+    :param started_at: Время начала (datetime).
+    :param is_paused: True если на паузе.
+    :param paused_at: Время постановки на паузу (если is_paused).
     :returns: Строка для сообщения в чат.
     """
     time_str = started_at.strftime("%H:%M")
+    if is_paused and paused_at is not None:
+        pause_str = paused_at.strftime("%H:%M")
+        return f"Событие {activity_name} на паузе (с {time_str}, пауза с {pause_str})."
+    if is_paused:
+        return f"Событие {activity_name} на паузе (с {time_str})."
     return f"Событие {activity_name} идёт с {time_str}."
 
 
@@ -165,7 +180,8 @@ def build_active_sessions_message(items: list[CurrentlyOnItem]) -> str:
     parts = []
     for it in items:
         time_str = it.started_at.strftime("%H:%M")
-        parts.append(f"{it.title} с {time_str}")
+        prefix = "⏸ " if it.is_paused else ""
+        parts.append(f"{prefix}{it.title} с {time_str}")
     return "Сейчас включено: " + "; ".join(parts)
 
 
@@ -186,6 +202,39 @@ def build_bug_confirm_keyboard(draft_id: int) -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="Отменить", callback_data=cn_data),
         ],
     ]
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def build_detail_buttons(item: CurrentlyOnItem) -> InlineKeyboardMarkup:
+    """
+    Кнопки для детального просмотра: Пауза/Продолжить + Выключить (для запланированных) или только Выключить (для hotkey).
+
+    :param item: Один элемент (hotkey или запланированное).
+    :returns: InlineKeyboardMarkup.
+    """
+    buttons: list[list[InlineKeyboardButton]] = []
+    if item.plan_item_id is not None:
+        if item.is_paused:
+            res_data = f"{CALLBACK_PREFIX_RESUME_PLAN}{item.plan_item_id}"
+            if _callback_fits(res_data):
+                buttons.append(
+                    [InlineKeyboardButton(text="▶ Продолжить", callback_data=res_data)]
+                )
+        else:
+            paus_data = f"{CALLBACK_PREFIX_PAUSE_PLAN}{item.plan_item_id}"
+            if _callback_fits(paus_data):
+                buttons.append(
+                    [InlineKeyboardButton(text="⏸ Пауза", callback_data=paus_data)]
+                )
+    fin_data = (
+        f"{CALLBACK_PREFIX_FINISH_PLAN}{item.plan_item_id}"
+        if item.plan_item_id is not None
+        else f"{CALLBACK_PREFIX_FINISH}{item.session_id}"
+    )
+    if _callback_fits(fin_data):
+        buttons.append(
+            [InlineKeyboardButton(text=f"Выключить {item.title}", callback_data=fin_data)]
+        )
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 

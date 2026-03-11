@@ -3,7 +3,7 @@
 from datetime import time
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 def _parse_time(v: str) -> time:
@@ -61,7 +61,11 @@ class PlanItemCreate(BaseModel):
     """
 
     kind: PlanItemKind = Field(..., description="task — дело, event — событие")
-    title: str = Field(..., min_length=1, max_length=512)
+    title: str | None = Field(
+        None,
+        max_length=512,
+        description="Название (обязательно для task; для event берётся из activity)",
+    )
     start_time: str = Field(..., description="Время начала в формате HH:MM или HH:MM:SS (локальное)")
     end_time: str = Field(..., description="Время конца (для task можно совпадать с start_time)")
     days_of_week: list[int] = Field(
@@ -85,6 +89,16 @@ class PlanItemCreate(BaseModel):
         if not all(1 <= d <= 7 for d in v):
             raise ValueError("Дни недели должны быть от 1 до 7")
         return v
+
+    @model_validator(mode="after")
+    def validate_create(self) -> "PlanItemCreate":
+        """Для task — title обязателен; для event — activity_id обязателен, title берётся из activity."""
+        if self.kind == "task":
+            if not self.title or not self.title.strip():
+                raise ValueError("Для дела укажите название")
+        if self.kind == "event" and self.activity_id is None:
+            raise ValueError("Для события укажите activity_id — без него бот не сможет отслеживать паузу и трекинг")
+        return self
 
 
 class PlanItemUpdate(BaseModel):

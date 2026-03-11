@@ -5,7 +5,7 @@ from zoneinfo import ZoneInfo
 
 from control_habits.reporting.dto import AnswerFact, DailyReport, SessionInterval
 from control_habits.schedule_model.expand import expand_template
-from control_habits.storage.models import ActiveSession, LogEntry
+from control_habits.storage.models import LogEntry, TimeSegment
 from control_habits.storage.repositories.logs import LogsRepo
 from control_habits.storage.repositories.schedule import ScheduleRepo
 from control_habits.storage.repositories.sessions import SessionsRepo
@@ -83,18 +83,18 @@ def _log_entry_to_answer_fact(entry: LogEntry) -> AnswerFact:
     )
 
 
-def _session_to_interval(session: ActiveSession) -> SessionInterval:
+def _session_to_interval(segment: TimeSegment) -> SessionInterval:
     """
-    Преобразовать закрытую сессию в SessionInterval.
+    Преобразовать закрытый отрезок в SessionInterval.
 
-    :param session: Закрытая сессия (ended_at не None).
+    :param segment: Закрытый TimeSegment (ended_at не None).
     :returns: SessionInterval с длительностью в секундах.
     """
-    assert session.ended_at is not None
-    duration = (session.ended_at - session.started_at).total_seconds()
+    assert segment.ended_at is not None
+    duration = (segment.ended_at - segment.started_at).total_seconds()
     return SessionInterval(
-        started_at=session.started_at,
-        ended_at=session.ended_at,
+        started_at=segment.started_at,
+        ended_at=segment.ended_at,
         duration_seconds=duration,
-        activity_id=session.activity_id,
+        activity_id=segment.activity_id,
     )

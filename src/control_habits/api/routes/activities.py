@@ -142,21 +142,38 @@ def create_hotkey(
     hotkeys_repo: HotkeysRepo = Depends(get_hotkeys_repo),
 ) -> HotkeyResponse:
     """
-    Создать hotkey-кнопку по названию: автоматически создаёт Activity (kind=hotkey) и Hotkey.
+    Создать hotkey-кнопку: по activity_id (существующая активность) или по name (создать новую).
 
-    :param body: Название кнопки.
+    :param body: activity_id или name.
     :param user_id: Идентификатор пользователя из сессии.
     :param activity_repo: Репозиторий активностей.
     :param hotkeys_repo: Репозиторий hotkeys.
     :returns: Созданная hotkey-кнопка.
     """
-    activity = activity_repo.create(user_id=user_id, name=body.name, kind="hotkey")
+    if body.activity_id is not None:
+        activity = activity_repo.get_by_id(body.activity_id)
+        if activity is None or activity.user_id != user_id:
+            raise HTTPException(status_code=404, detail="Активность не найдена")
+        existing_hotkeys = hotkeys_repo.list_by_user(user_id)
+        if any(h.activity_id == body.activity_id for h in existing_hotkeys):
+            raise HTTPException(
+                status_code=400,
+                detail="Эта активность уже добавлена в быстрые кнопки",
+            )
+        label = activity.name
+    else:
+        name = (body.name or "").strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="Укажите название или выберите активность")
+        activity = activity_repo.create(user_id=user_id, name=name, kind="hotkey")
+        label = name
+
     existing = hotkeys_repo.list_by_user(user_id)
     next_order = max((h.order for h in existing), default=-1) + 1
     hotkey = hotkeys_repo.add(
         user_id=user_id,
         activity_id=activity.id,
-        label=body.name,
+        label=label,
         order=next_order,
     )
     return _hotkey_to_response(hotkey, activity_repo)

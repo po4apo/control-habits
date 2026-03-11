@@ -10,6 +10,8 @@ CALLBACK_PREFIX_ACTIVE = "act_"  # кнопка «Что включено»
 CALLBACK_PREFIX_ACTIVE_DETAIL = "actd_"  # деталь сессии: actd_<session_id>
 CALLBACK_PREFIX_ACTIVE_DETAIL_PLAN = "actd_plan_"  # деталь запланированного события: actd_plan_<plan_item_id>
 CALLBACK_PREFIX_FINISH_PLAN = "fin_plan_"  # выключить запланированное событие: fin_plan_<plan_item_id>
+CALLBACK_PREFIX_PAUSE_PLAN = "pp_"  # пауза запланированного: pp_<plan_item_id>
+CALLBACK_PREFIX_RESUME_PLAN = "rp_"  # продолжить запланированное: rp_<plan_item_id>
 CALLBACK_PREFIX_HOTKEYS_MENU = "hkmenu_"  # открытие меню горячих клавиш
 
 # Баг-репорт: подтверждение отправки / отмена
@@ -47,9 +49,11 @@ class CurrentlyOnItem:
     Элемент «что сейчас включено»: либо hotkey-сессия, либо запланированное событие (Начал, но ещё не Закончил).
 
     Для hotkey: session_id задан, plan_item_id None. Для запланированного: plan_item_id задан, session_id None.
+    is_paused: True если запланированное событие на паузе (есть закрытые сегменты, открытого нет).
     """
 
-    session_id: int | None  # hotkey-сессия
+    session_id: int | None  # hotkey: id TimeSegment
     plan_item_id: int | None  # запланированное событие из расписания
     title: str
     started_at: datetime
+    is_paused: bool = False

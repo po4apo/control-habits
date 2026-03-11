@@ -10,7 +10,7 @@ from control_habits.storage.models import (
     PlanItem,
     Notification,
     LogEntry,
-    ActiveSession,
+    TimeSegment,
 )
 from control_habits.storage.repositories import (
     UsersRepo,
@@ -33,7 +33,7 @@ __all__ = [
     "PlanItem",
     "Notification",
     "LogEntry",
-    "ActiveSession",
+    "TimeSegment",
     "UsersRepo",
     "LinkCodesRepo",
     "ScheduleRepo",

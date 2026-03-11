@@ -20,6 +20,8 @@ from control_habits.bot_messages.types import (
 )
 from control_habits.storage.repositories.logs import LogsRepo
 from control_habits.storage.repositories.notifications import NotificationsRepo
+from control_habits.storage.repositories.schedule import ScheduleRepo
+from control_habits.storage.repositories.sessions import TimeSegmentRepo
 from control_habits.storage.repositories.users import UsersRepo
 
 # Префиксы callback_data, относящиеся к ответам на пуши (для фильтрации)
@@ -86,7 +88,14 @@ def setup_push_callback_handler(
     router: Router,
     get_deps: Callable[
         [],
-        tuple[UsersRepo, LogsRepo, NotificationsRepo, Session],
+        tuple[
+            UsersRepo,
+            LogsRepo,
+            NotificationsRepo,
+            ScheduleRepo,
+            TimeSegmentRepo,
+            Session,
+        ],
     ],
 ) -> None:
     """
@@ -112,18 +121,11 @@ def setup_push_callback_handler(
         telegram_user_id = callback.from_user.id if callback.from_user else 0
         idempotency_key = str(notification_id)
 
-        users_repo, logs_repo, notifications_repo, session = get_deps()
+        users_repo, logs_repo, notifications_repo, schedule_repo, segments_repo, session = get_deps()
         try:
             user = users_repo.get_by_telegram_id(telegram_user_id)
             if user is None:
                 await callback.answer("Сначала привяжи аккаунт через /start.", show_alert=True)
-                return
-
-            already_logged = logs_repo.exists_by_idempotency_key(idempotency_key)
-
-            if already_logged:
-                await callback.answer(MSG_ALREADY_COUNTED, show_alert=False)
-                await _edit_message_to_already_counted(callback)
                 return
 
             notification = notifications_repo.get_by_id(notification_id)
@@ -131,15 +133,48 @@ def setup_push_callback_handler(
                 await callback.answer("Уведомление не найдено.", show_alert=True)
                 return
 
-            now = datetime.now(timezone.utc)
-            logs_repo.add(
-                user_id=user.id,
-                responded_at=now,
-                action=action,
-                plan_item_id=notification.plan_item_id,
-                planned_at=notification.planned_at,
-                payload={"idempotency_key": idempotency_key, "notification_id": notification_id},
-            )
+            if action in ("event_started", "event_ended"):
+                if action == "event_started":
+                    open_seg = segments_repo.get_open_by_plan_item(user.id, notification.plan_item_id)
+                    if open_seg is not None:
+                        await callback.answer(MSG_ALREADY_COUNTED, show_alert=False)
+                        await _edit_message_to_already_counted(callback)
+                        return
+                    plan_item = schedule_repo.get_plan_item(notification.plan_item_id)
+                    activity_id = plan_item.activity_id if plan_item else None
+                    if activity_id is None:
+                        await callback.answer("Событие не привязано к активности.", show_alert=True)
+                        return
+                    now = datetime.now(timezone.utc)
+                    segments_repo.create(
+                        user_id=user.id,
+                        activity_id=activity_id,
+                        started_at=now,
+                        plan_item_id=notification.plan_item_id,
+                    )
+                else:
+                    open_seg = segments_repo.get_open_by_plan_item(user.id, notification.plan_item_id)
+                    if open_seg is None:
+                        await callback.answer(MSG_ALREADY_COUNTED, show_alert=False)
+                        await _edit_message_to_already_counted(callback)
+                        return
+                    now = datetime.now(timezone.utc)
+                    segments_repo.close(open_seg.id, now)
+            else:
+                already_logged = logs_repo.exists_by_idempotency_key(idempotency_key)
+                if already_logged:
+                    await callback.answer(MSG_ALREADY_COUNTED, show_alert=False)
+                    await _edit_message_to_already_counted(callback)
+                    return
+                now = datetime.now(timezone.utc)
+                logs_repo.add(
+                    user_id=user.id,
+                    responded_at=now,
+                    action=action,
+                    plan_item_id=notification.plan_item_id,
+                    planned_at=notification.planned_at,
+                    payload={"idempotency_key": idempotency_key, "notification_id": notification_id},
+                )
             session.commit()
 
             await callback.answer(MSG_COUNTED, show_alert=False)

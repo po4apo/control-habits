@@ -65,29 +65,40 @@ flowchart TD
 3. Проверка идемпотентности: уже есть LogEntry по этому ключу? Если да — ответить `answer_callback_query`, при необходимости отредактировать сообщение («Уже учтено»), выйти.
 4. Иначе: записать LogEntry с `responded_at=now()`, обновить сообщение в чате (убрать кнопки или показать «Учтено»), вызвать `answer_callback_query`.
 
-### 3.4 Hotkey: старт/стоп и список активных
-1. Нажатие кнопки активности: если активной сессии по этой активности нет — создать ActiveSession, записать LogEntry `session_start`; иначе — завершить сессию (`ended_at=now()`), записать LogEntry `session_end`.
-2. `/active` или «Что сейчас идёт»: прочитать `list_active_sessions(user_id)`, сформировать сообщение и inline-кнопки «Закончить» по каждой сессии. Callback «Закончить» привязан к `session_id` (или user_id+activity_id), обработка идемпотентна.
+### 3.4 Hotkey и события: старт/стоп/пауза и список активных
+1. Нажатие кнопки активности: если активного отрезка нет — создать TimeSegment; иначе — завершить (`ended_at=now()`). Пауза = закрыть отрезок; продолжение = создать новый (перерыв не учитывается в длительности).
+2. `/active` или «Что сейчас идёт»: прочитать активные TimeSegment (с `ended_at IS NULL`), сформировать сообщение и inline-кнопки «Закончить» / «Пауза» по каждому отрезку. Callback привязан к segment_id или activity_id, обработка идемпотентна.
 
 ## 4. Хранилище данных
 
 Рекомендуемая СУБД: **PostgreSQL**. Для локальной разработки допустим SQLite с учётом ограничений (конкурентность, блокировки).
 
-Черновая схема таблиц:
+### 4.1 Таблицы
 
 | Таблица | Ключевые поля |
 |--------|----------------|
 | `users` | id, telegram_user_id (unique), timezone, created_at |
 | `link_codes` | code (unique), web_session_id, expires_at, consumed_at, telegram_user_id |
-| `activities` | id, user_id, name, kind |
+| `activities` | id, user_id, name, kind (hotkey \| regular) |
 | `hotkeys` | id, user_id, activity_id, label, order |
 | `schedule_templates` | id, user_id, name |
 | `plan_items` | id, template_id, kind, title, start_time, end_time, days_of_week, activity_id (nullable) |
 | `notifications` | id, user_id, plan_item_id, planned_at, type, sent_at, idempotency_key (unique) |
 | `log_entries` | id, user_id, plan_item_id, activity_id, planned_at, responded_at, action, payload |
-| `active_sessions` | id, user_id, activity_id, started_at, ended_at (nullable) |
+| `time_segments` | id, user_id, activity_id, plan_item_id (nullable), started_at, ended_at (nullable) |
+| `bug_report_drafts` | id, user_id, telegram_user_id, description, state, created_at, updated_at, github_issue_url |
 
-Индексы: по `telegram_user_id`, `user_id` в связанных таблицах; по `planned_at`, `sent_at` и `idempotency_key` для планировщика и идемпотентности; по `(user_id, activity_id, ended_at)` для активных сессий.
+### 4.2 Схема plan_items (детали)
+
+- **kind**: `task` — дело (одна точка времени); `event` — событие (блок времени).
+- **title**: для task — задаётся пользователем; для event — берётся из `activity.name`, не редактируется вручную.
+- **activity_id**: для event обязателен (пауза, трекинг в боте); для task опционально.
+
+### 4.3 Индексы
+
+- `telegram_user_id`, `user_id` в связанных таблицах.
+- `planned_at`, `sent_at`, `idempotency_key` для планировщика и идемпотентности.
+- `(user_id, activity_id, ended_at)` для активных отрезков (time_segments).
 
 ## 5. Планировщик: варианты реализации
 

@@ -17,8 +17,7 @@ from control_habits.bot_messages.types import (
 from control_habits.hotkey_sessions import start_session, stop_session
 from control_habits.storage.repositories.activity import ActivityRepo
 from control_habits.storage.repositories.hotkeys import HotkeysRepo
-from control_habits.storage.repositories.logs import LogsRepo
-from control_habits.storage.repositories.sessions import SessionsRepo
+from control_habits.storage.repositories.sessions import TimeSegmentRepo
 from control_habits.storage.repositories.users import UsersRepo
 
 MSG_HOTKEYS_CHOOSE = "Выберите событие:"
@@ -74,7 +73,7 @@ def setup_hotkey_handler(
     router: Router,
     get_deps: Callable[
         [],
-        tuple[UsersRepo, SessionsRepo, ActivityRepo, LogsRepo, Session],
+        tuple[UsersRepo, TimeSegmentRepo, ActivityRepo, Session],
     ],
     get_keyboard_deps: Callable[
         [],
@@ -98,8 +97,8 @@ def setup_hotkey_handler(
 
         def _get_active_ids(user_id: int, db_session: Session) -> set[int]:
             """Получить множество activity_id с активными сессиями."""
-            sessions_repo = SessionsRepo(db_session)
-            active = sessions_repo.list_active(user_id)
+            segments_repo = TimeSegmentRepo(db_session)
+            active = segments_repo.list_active(user_id)
             return {s.activity_id for s in active}
 
         @router.message(lambda m: m.text and m.text.strip() == HOTKEYS_MENU_LABEL)
@@ -167,7 +166,7 @@ def setup_hotkey_handler(
             return
 
         telegram_user_id = callback.from_user.id if callback.from_user else 0
-        users_repo, sessions_repo, activity_repo, logs_repo, session = get_deps()
+        users_repo, segments_repo, activity_repo, session = get_deps()
         try:
             user = users_repo.get_by_telegram_id(telegram_user_id)
             if user is None:
@@ -185,37 +184,23 @@ def setup_hotkey_handler(
             now = datetime.now(timezone.utc)
             activity_name = activity.name or "Активность"
 
-            existing = sessions_repo.get_active(user.id, activity_id)
+            existing = segments_repo.get_active(user.id, activity_id)
             if existing is None:
                 start_session(
-                    sessions_repo=sessions_repo,
+                    sessions_repo=segments_repo,
                     user_id=user.id,
                     activity_id=activity_id,
                     now=now,
-                )
-                logs_repo.add(
-                    user_id=user.id,
-                    responded_at=now,
-                    action="session_start",
-                    activity_id=activity_id,
                 )
                 session.commit()
                 text = f"▶ {activity_name} включено."
             else:
                 duration = stop_session(
-                    sessions_repo=sessions_repo,
+                    sessions_repo=segments_repo,
                     user_id=user.id,
                     activity_id=activity_id,
                     now=now,
                 )
-                if duration is not None:
-                    logs_repo.add(
-                        user_id=user.id,
-                        responded_at=now,
-                        action="session_end",
-                        activity_id=activity_id,
-                        payload={"duration_seconds": duration},
-                    )
                 session.commit()
                 if duration is not None:
                     text = f"⏹ {activity_name} выключено (шло {_format_duration_minutes(duration)})."
@@ -239,8 +224,8 @@ def setup_hotkey_handler(
             return
         kb_users_repo, hotkeys_repo, kb_activity_repo, kb_session = get_keyboard_deps()
         try:
-            kb_sessions_repo = SessionsRepo(kb_session)
-            active_sessions = kb_sessions_repo.list_active(user_id)
+            kb_segments_repo = TimeSegmentRepo(kb_session)
+            active_sessions = kb_segments_repo.list_active(user_id)
             active_ids = {s.activity_id for s in active_sessions}
             keyboard = build_hotkeys_keyboard(
                 user_id,

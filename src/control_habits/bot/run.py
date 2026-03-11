@@ -28,7 +28,7 @@ from control_habits.storage.repositories.link_codes import LinkCodesRepo
 from control_habits.storage.repositories.logs import LogsRepo
 from control_habits.storage.repositories.notifications import NotificationsRepo
 from control_habits.storage.repositories.schedule import ScheduleRepo
-from control_habits.storage.repositories.sessions import SessionsRepo
+from control_habits.storage.repositories.sessions import SessionsRepo, TimeSegmentRepo
 from control_habits.storage.repositories.users import UsersRepo
 
 logging.basicConfig(
@@ -68,35 +68,40 @@ def run_polling() -> None:
         return service, session
 
     def get_push_callback_deps() -> tuple[
-        UsersRepo, LogsRepo, NotificationsRepo, Session
+        UsersRepo,
+        LogsRepo,
+        NotificationsRepo,
+        ScheduleRepo,
+        TimeSegmentRepo,
+        Session,
     ]:
         session = session_factory()
         users_repo = UsersRepo(session)
         logs_repo = LogsRepo(session)
         notifications_repo = NotificationsRepo(session)
-        return users_repo, logs_repo, notifications_repo, session
+        schedule_repo = ScheduleRepo(session)
+        segments_repo = TimeSegmentRepo(session)
+        return users_repo, logs_repo, notifications_repo, schedule_repo, segments_repo, session
 
-    def get_session_deps() -> tuple[
-        UsersRepo, SessionsRepo, ActivityRepo, LogsRepo, Session
-    ]:
+    def get_hotkey_deps() -> tuple[UsersRepo, TimeSegmentRepo, ActivityRepo, Session]:
+        """Репозитории для hotkey (start/stop сессий)."""
         session = session_factory()
         users_repo = UsersRepo(session)
-        sessions_repo = SessionsRepo(session)
+        segments_repo = TimeSegmentRepo(session)
         activity_repo = ActivityRepo(session)
-        logs_repo = LogsRepo(session)
-        return users_repo, sessions_repo, activity_repo, logs_repo, session
+        return users_repo, segments_repo, activity_repo, session
 
     def get_active_deps() -> tuple[
-        UsersRepo, SessionsRepo, ActivityRepo, LogsRepo, ScheduleRepo, Session
+        UsersRepo, TimeSegmentRepo, ActivityRepo, LogsRepo, ScheduleRepo, Session
     ]:
-        """Репозитории для «Что включено» (hotkey-сессии + запланированные события в процессе)."""
+        """Репозитории для «Что включено» (открытые отрезки + запланированные на паузе)."""
         session = session_factory()
         users_repo = UsersRepo(session)
-        sessions_repo = SessionsRepo(session)
+        segments_repo = TimeSegmentRepo(session)
         activity_repo = ActivityRepo(session)
         logs_repo = LogsRepo(session)
         schedule_repo = ScheduleRepo(session)
-        return users_repo, sessions_repo, activity_repo, logs_repo, schedule_repo, session
+        return users_repo, segments_repo, activity_repo, logs_repo, schedule_repo, session
 
     def get_keyboard_deps() -> tuple[
         UsersRepo, HotkeysRepo, ActivityRepo, Session
@@ -128,7 +133,7 @@ def run_polling() -> None:
         web_app_url=settings.web_app_url,
     )
     setup_push_callback_handler(router, get_push_callback_deps)
-    setup_hotkey_handler(router, get_session_deps, get_keyboard_deps=get_keyboard_deps)
+    setup_hotkey_handler(router, get_hotkey_deps, get_keyboard_deps=get_keyboard_deps)
     setup_active_handler(router, get_active_deps)
     setup_bug_report_handler(
         router,
