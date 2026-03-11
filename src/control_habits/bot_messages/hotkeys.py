@@ -121,24 +121,30 @@ def build_hotkeys_keyboard(
     activity_repo: ActivityRepo,
     *,
     include_active_button: bool = False,
+    active_activity_ids: set[int] | None = None,
 ) -> InlineKeyboardMarkup:
     """
     Клавиатура с hotkey-кнопками пользователя (подписи из Hotkey.label, callback_data: hk_<activity_id>).
+
+    Активные сессии помечаются префиксом ``▶`` на кнопке.
 
     :param user_id: Идентификатор пользователя.
     :param hotkeys_repo: Репозиторий hotkeys (list_by_user).
     :param activity_repo: Не используется для подписей (подпись берётся из Hotkey.label), оставлен для совместимости с контрактом.
     :param include_active_button: Добавить в конец ряд с кнопкой «Что включено» (callback_data act_).
+    :param active_activity_ids: Множество activity_id с активными сессиями; помеченные кнопки получают префикс.
     :returns: InlineKeyboardMarkup с кнопками; callback_data в пределах 64 байт.
     """
+    active_ids = active_activity_ids or set()
     hotkeys = hotkeys_repo.list_by_user(user_id)
     buttons: list[list[InlineKeyboardButton]] = []
     for hk in hotkeys:
         callback_data = f"{CALLBACK_PREFIX_HOTKEY}{hk.activity_id}"
         if not _callback_fits(callback_data):
             continue
+        label = f"▶ {hk.label}" if hk.activity_id in active_ids else hk.label
         buttons.append(
-            [InlineKeyboardButton(text=hk.label, callback_data=callback_data)]
+            [InlineKeyboardButton(text=label, callback_data=callback_data)]
         )
     if include_active_button and _callback_fits(CALLBACK_PREFIX_ACTIVE):
         buttons.append(

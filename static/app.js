@@ -457,7 +457,7 @@ function renderHotkeys(container) {
       <div class="table-wrap">
         <table>
           <thead>
-            <tr><th>Активность</th><th>Подпись на кнопке</th><th>Порядок</th><th>Действия</th></tr>
+            <tr><th>Название</th><th>Действия</th></tr>
           </thead>
           <tbody id="hotkeysBody"></tbody>
         </table>
@@ -471,23 +471,15 @@ function renderHotkeys(container) {
   const hotkeysError = document.getElementById('hotkeysError');
 
   let hotkeys = [];
-  let activities = [];
 
   async function load() {
     try {
-      [hotkeys, activities] = await Promise.all([
-        api('/activities/hotkeys'),
-        api('/activities'),
-      ]);
-      const hotkeyActivities = activities.filter((a) => a.kind === 'hotkey');
-      const byId = Object.fromEntries(activities.map((a) => [a.id, a]));
+      hotkeys = await api('/activities/hotkeys');
       tbody.innerHTML = hotkeys
         .map(
-          (h, idx) => `
+          (h) => `
           <tr>
-            <td>${escapeHtml(byId[h.activity_id]?.name || '—')}</td>
-            <td>${escapeHtml(h.label)}</td>
-            <td>${idx + 1}</td>
+            <td>${escapeHtml(h.name || h.label)}</td>
             <td class="table-actions">
               <button type="button" class="btn btn-secondary" data-up="${h.id}" title="Выше">↑</button>
               <button type="button" class="btn btn-secondary" data-down="${h.id}" title="Ниже">↓</button>
@@ -547,24 +539,12 @@ function renderHotkeys(container) {
   btnAdd.addEventListener('click', () => {
     const modal = document.createElement('div');
     modal.className = 'modal-overlay';
-    const hotkeyActivities = activities.filter((a) => a.kind === 'hotkey');
-    const alreadyIds = new Set(hotkeys.map((h) => h.activity_id));
-    const available = hotkeyActivities.filter((a) => !alreadyIds.has(a.id));
     modal.innerHTML = `
       <div class="modal">
         <h2>Добавить кнопку</h2>
         <div class="form-group">
-          <label>Активность</label>
-          <select id="addActivityId">
-            ${available.length ? available.map((a) => `<option value="${a.id}">${escapeHtml(a.name)}</option>`).join('') : '<option value="">— Нет доступных —</option>'}
-          </select>
-        </div>
-        <div class="form-group">
-          <label>Подпись на кнопке</label>
-          <input type="text" id="addLabel" placeholder="Текст кнопки">
-        </div>
-        <div class="form-group text-muted" style="font-size: 0.85rem;">
-          Или создать новую активность: <input type="text" id="newActivityName" placeholder="Название" style="max-width: 140px;"> <button type="button" class="btn btn-secondary" id="btnCreateActivity">Создать и добавить</button>
+          <label>Название</label>
+          <input type="text" id="addName" placeholder="Например: YouTube, Работа, Чтение">
         </div>
         <div class="modal-actions">
           <button type="button" class="btn" id="addSave">Добавить</button>
@@ -574,31 +554,12 @@ function renderHotkeys(container) {
     `;
     modal.querySelector('#addCancel').addEventListener('click', () => modal.remove());
     modal.querySelector('#addSave').addEventListener('click', async () => {
-      const activityId = Number(modal.querySelector('#addActivityId').value);
-      const label = modal.querySelector('#addLabel').value.trim();
-      if (!activityId || !label) return;
-      try {
-        await api('/activities/hotkeys', {
-          method: 'POST',
-          body: JSON.stringify({ activity_id: activityId, label }),
-        });
-        modal.remove();
-        load();
-      } catch (e) {
-        alert(e.message);
-      }
-    });
-    modal.querySelector('#btnCreateActivity').addEventListener('click', async () => {
-      const name = modal.querySelector('#newActivityName').value.trim();
+      const name = modal.querySelector('#addName').value.trim();
       if (!name) return;
       try {
-        const activity = await api('/activities', {
-          method: 'POST',
-          body: JSON.stringify({ name, kind: 'hotkey' }),
-        });
         await api('/activities/hotkeys', {
           method: 'POST',
-          body: JSON.stringify({ activity_id: activity.id, label: name }),
+          body: JSON.stringify({ name }),
         });
         modal.remove();
         load();

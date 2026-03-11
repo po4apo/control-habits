@@ -98,6 +98,15 @@ def delete_activity(
 # --- Hotkey-кнопки ---
 
 
+def _hotkey_to_response(hotkey: object, activity_repo: ActivityRepo) -> HotkeyResponse:
+    """Собрать HotkeyResponse с подгрузкой имени активности."""
+    activity = activity_repo.get_by_id(hotkey.activity_id)  # type: ignore[attr-defined]
+    name = activity.name if activity else ""
+    resp = HotkeyResponse.model_validate(hotkey)
+    resp.name = name
+    return resp
+
+
 @router.get(
     "/hotkeys",
     response_model=list[HotkeyResponse],
@@ -106,16 +115,18 @@ def delete_activity(
 def list_hotkeys(
     user_id: int = Depends(get_current_user_id),
     hotkeys_repo: HotkeysRepo = Depends(get_hotkeys_repo),
+    activity_repo: ActivityRepo = Depends(get_activity_repo),
 ) -> list[HotkeyResponse]:
     """
     Получить список hotkey-кнопок текущего пользователя (отсортированы по order).
 
     :param user_id: Идентификатор пользователя из сессии.
     :param hotkeys_repo: Репозиторий hotkeys.
-    :returns: Список hotkey-кнопок.
+    :param activity_repo: Репозиторий активностей.
+    :returns: Список hotkey-кнопок с названиями активностей.
     """
     hotkeys = hotkeys_repo.list_by_user(user_id)
-    return [HotkeyResponse.model_validate(h) for h in hotkeys]
+    return [_hotkey_to_response(h, activity_repo) for h in hotkeys]
 
 
 @router.post(
@@ -131,30 +142,24 @@ def create_hotkey(
     hotkeys_repo: HotkeysRepo = Depends(get_hotkeys_repo),
 ) -> HotkeyResponse:
     """
-    Добавить hotkey-кнопку (привязать активность к кнопке с подписью).
+    Создать hotkey-кнопку по названию: автоматически создаёт Activity (kind=hotkey) и Hotkey.
 
-    order назначается в конец списка.
-
-    :param body: activity_id и label.
+    :param body: Название кнопки.
     :param user_id: Идентификатор пользователя из сессии.
-    :param activity_repo: Репозиторий активностей (проверка владения).
+    :param activity_repo: Репозиторий активностей.
     :param hotkeys_repo: Репозиторий hotkeys.
     :returns: Созданная hotkey-кнопка.
     """
-    activity = activity_repo.get_by_id(body.activity_id)
-    if activity is None:
-        raise HTTPException(status_code=404, detail="Активность не найдена")
-    if activity.user_id != user_id:
-        raise HTTPException(status_code=403, detail="Нет доступа к активности")
+    activity = activity_repo.create(user_id=user_id, name=body.name, kind="hotkey")
     existing = hotkeys_repo.list_by_user(user_id)
     next_order = max((h.order for h in existing), default=-1) + 1
     hotkey = hotkeys_repo.add(
         user_id=user_id,
-        activity_id=body.activity_id,
-        label=body.label,
+        activity_id=activity.id,
+        label=body.name,
         order=next_order,
     )
-    return HotkeyResponse.model_validate(hotkey)
+    return _hotkey_to_response(hotkey, activity_repo)
 
 
 @router.delete(
@@ -190,6 +195,7 @@ def reorder_hotkeys(
     body: HotkeyReorderBody,
     user_id: int = Depends(get_current_user_id),
     hotkeys_repo: HotkeysRepo = Depends(get_hotkeys_repo),
+    activity_repo: ActivityRepo = Depends(get_activity_repo),
 ) -> list[HotkeyResponse]:
     """
     Задать новый порядок hotkey: передать список id в нужном порядке.
@@ -197,8 +203,9 @@ def reorder_hotkeys(
     :param body: Список hotkey_ids в новом порядке.
     :param user_id: Идентификатор пользователя из сессии.
     :param hotkeys_repo: Репозиторий hotkeys.
+    :param activity_repo: Репозиторий активностей.
     :returns: Обновлённый список hotkey (по order).
     """
     hotkeys_repo.reorder(user_id, body.hotkey_ids)
     updated = hotkeys_repo.list_by_user(user_id)
-    return [HotkeyResponse.model_validate(h) for h in updated]
+    return [_hotkey_to_response(h, activity_repo) for h in updated]

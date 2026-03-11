@@ -2,7 +2,9 @@
 
 from collections.abc import Callable
 from datetime import datetime, timezone
+
 from aiogram import Router
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Filter
 from aiogram.types import CallbackQuery, Message
 from sqlalchemy.orm import Session
@@ -94,6 +96,12 @@ def setup_hotkey_handler(
 
     if get_keyboard_deps is not None:
 
+        def _get_active_ids(user_id: int, db_session: Session) -> set[int]:
+            """Получить множество activity_id с активными сессиями."""
+            sessions_repo = SessionsRepo(db_session)
+            active = sessions_repo.list_active(user_id)
+            return {s.activity_id for s in active}
+
         @router.message(lambda m: m.text and m.text.strip() == HOTKEYS_MENU_LABEL)
         async def on_hotkeys_menu_message(message: Message) -> None:
             """По нажатию Reply-кнопки «Горячие клавиши»: сообщение «Выберите событие» и inline-клавиатура hotkeys."""
@@ -106,11 +114,13 @@ def setup_hotkey_handler(
                         "Сначала привяжи аккаунт через /start.",
                     )
                     return
+                active_ids = _get_active_ids(user.id, session)
                 keyboard = build_hotkeys_keyboard(
                     user.id,
                     hotkeys_repo,
                     activity_repo,
                     include_active_button=False,
+                    active_activity_ids=active_ids,
                 )
                 await message.answer(
                     MSG_HOTKEYS_CHOOSE,
@@ -132,11 +142,13 @@ def setup_hotkey_handler(
                         show_alert=True,
                     )
                     return
+                active_ids = _get_active_ids(user.id, session)
                 keyboard = build_hotkeys_keyboard(
                     user.id,
                     hotkeys_repo,
                     activity_repo,
                     include_active_button=False,
+                    active_activity_ids=active_ids,
                 )
                 await callback.answer()
                 if callback.message:
@@ -188,7 +200,7 @@ def setup_hotkey_handler(
                     activity_id=activity_id,
                 )
                 session.commit()
-                await callback.answer(f"{activity_name} включено.", show_alert=False)
+                text = f"▶ {activity_name} включено."
             else:
                 duration = stop_session(
                     sessions_repo=sessions_repo,
@@ -206,12 +218,41 @@ def setup_hotkey_handler(
                     )
                 session.commit()
                 if duration is not None:
-                    text = f"{activity_name} выключено (шло {_format_duration_minutes(duration)})."
+                    text = f"⏹ {activity_name} выключено (шло {_format_duration_minutes(duration)})."
                 else:
                     text = f"{activity_name} уже было выключено."
-                await callback.answer(text, show_alert=False)
+
+            await callback.answer(text, show_alert=True)
+            await _update_hotkeys_keyboard(callback, user.id)
         except Exception:
             session.rollback()
             raise
         finally:
             session.close()
+
+    async def _update_hotkeys_keyboard(
+        callback: CallbackQuery,
+        user_id: int,
+    ) -> None:
+        """Обновить inline-клавиатуру: пометить активные сессии индикатором."""
+        if get_keyboard_deps is None or not callback.message:
+            return
+        kb_users_repo, hotkeys_repo, kb_activity_repo, kb_session = get_keyboard_deps()
+        try:
+            kb_sessions_repo = SessionsRepo(kb_session)
+            active_sessions = kb_sessions_repo.list_active(user_id)
+            active_ids = {s.activity_id for s in active_sessions}
+            keyboard = build_hotkeys_keyboard(
+                user_id,
+                hotkeys_repo,
+                kb_activity_repo,
+                include_active_button=False,
+                active_activity_ids=active_ids,
+            )
+            try:
+                await callback.message.edit_reply_markup(reply_markup=keyboard)
+            except TelegramBadRequest as e:
+                if "message is not modified" not in str(e):
+                    raise
+        finally:
+            kb_session.close()

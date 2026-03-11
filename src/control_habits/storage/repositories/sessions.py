@@ -95,6 +95,7 @@ class SessionsRepo:
         session = self._session.get(ActiveSession, session_id)
         if session is not None:
             session.ended_at = ended_at
+            self._session.flush()
 
     def list_closed_in_range(
         self,

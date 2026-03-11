@@ -32,19 +32,19 @@ class ActivityResponse(BaseModel):
 
 
 class HotkeyCreate(BaseModel):
-    """Тело запроса добавления hotkey-кнопки."""
+    """Тело запроса добавления hotkey-кнопки (упрощённый: только название)."""
 
-    activity_id: int = Field(..., description="Идентификатор активности")
-    label: str = Field(..., min_length=1, max_length=128, description="Подпись на кнопке")
+    name: str = Field(..., min_length=1, max_length=128, description="Название кнопки")
 
 
 class HotkeyResponse(BaseModel):
-    """Ответ: hotkey-кнопка (с названием активности для удобства)."""
+    """Ответ: hotkey-кнопка."""
 
     id: int
     activity_id: int
     label: str
     order: int
+    name: str = ""
 
     model_config = {"from_attributes": True}
 
