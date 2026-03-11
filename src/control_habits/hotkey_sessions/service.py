@@ -2,13 +2,13 @@
 
 from datetime import datetime
 
-from control_habits.storage.models import ActiveSession
+from control_habits.storage.models import TimeSegment
 from control_habits.storage.repositories.activity import ActivityRepo
-from control_habits.storage.repositories.sessions import SessionsRepo
+from control_habits.storage.repositories.sessions import TimeSegmentRepo
 
 
 def start_session(
-    sessions_repo: SessionsRepo,
+    sessions_repo: TimeSegmentRepo,
     user_id: int,
     activity_id: int,
     now: datetime,
@@ -32,7 +32,7 @@ def start_session(
 
 
 def stop_session(
-    sessions_repo: SessionsRepo,
+    sessions_repo: TimeSegmentRepo,
     user_id: int,
     activity_id: int,
     now: datetime,
@@ -57,10 +57,10 @@ def stop_session(
 
 
 def list_active_sessions(
-    sessions_repo: SessionsRepo,
+    sessions_repo: TimeSegmentRepo,
     activity_repo: ActivityRepo,
     user_id: int,
-) -> list[ActiveSession]:
+) -> list[TimeSegment]:
     """
     Все активные сессии пользователя (ended_at IS NULL) с подгрузкой названий активностей.
 
@@ -69,7 +69,7 @@ def list_active_sessions(
     :param sessions_repo: Репозиторий сессий.
     :param activity_repo: Репозиторий активностей (для подгрузки названий).
     :param user_id: Идентификатор пользователя.
-    :returns: Список ActiveSession, упорядоченный по started_at.
+    :returns: Список TimeSegment, упорядоченный по started_at.
     """
     sessions = sessions_repo.list_active(user_id)
     for session in sessions:
@@ -80,3 +80,57 @@ def list_active_sessions(
             activity.name if activity is not None else None,
         )
     return sessions
+
+
+def pause_session(
+    sessions_repo: TimeSegmentRepo,
+    user_id: int,
+    activity_id: int,
+    now: datetime,
+    plan_item_id: int | None = None,
+) -> float | None:
+    """
+    Поставить на паузу: закрыть открытый отрезок.
+
+    :param sessions_repo: Репозиторий отрезков.
+    :param user_id: Идентификатор пользователя.
+    :param activity_id: Идентификатор активности.
+    :param now: Время паузы (UTC).
+    :param plan_item_id: Опционально — для запланированного события.
+    :returns: Длительность закрытого отрезка в секундах или None.
+    """
+    if plan_item_id is not None:
+        segment = sessions_repo.get_open_by_plan_item(user_id, plan_item_id)
+    else:
+        segment = sessions_repo.get_open(user_id, activity_id, None)
+    if segment is None:
+        return None
+    duration = (now - segment.started_at).total_seconds()
+    sessions_repo.close(segment.id, now)
+    return duration
+
+
+def resume_session(
+    sessions_repo: TimeSegmentRepo,
+    user_id: int,
+    activity_id: int,
+    now: datetime,
+    plan_item_id: int | None = None,
+) -> int:
+    """
+    Продолжить: создать новый отрезок.
+
+    :param sessions_repo: Репозиторий отрезков.
+    :param user_id: Идентификатор пользователя.
+    :param activity_id: Идентификатор активности.
+    :param now: Время возобновления (UTC).
+    :param plan_item_id: Опционально — для запланированного события.
+    :returns: Идентификатор нового отрезка.
+    """
+    segment = sessions_repo.create(
+        user_id=user_id,
+        activity_id=activity_id,
+        started_at=now,
+        plan_item_id=plan_item_id,
+    )
+    return segment.id

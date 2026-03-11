@@ -5,6 +5,7 @@ from datetime import time
 from fastapi import APIRouter, Depends, HTTPException
 
 from control_habits.api.deps import (
+    get_activity_repo,
     get_current_user_id,
     get_schedule_repo,
 )
@@ -16,6 +17,7 @@ from control_habits.api.schemas.schedule import (
     ScheduleTemplateResponse,
     ScheduleTemplateUpdate,
 )
+from control_habits.storage.repositories.activity import ActivityRepo
 from control_habits.storage.repositories.schedule import ScheduleRepo, _UNSET
 
 
@@ -177,16 +179,19 @@ def create_plan_item(
     body: PlanItemCreate,
     user_id: int = Depends(get_current_user_id),
     schedule_repo: ScheduleRepo = Depends(get_schedule_repo),
+    activity_repo: ActivityRepo = Depends(get_activity_repo),
 ) -> PlanItemResponse:
     """
     Создать элемент плана (дело или событие).
 
     Время в теле — в локальном времени пользователя (день); в БД хранится как время дня.
+    Для событий title берётся из activity, если не передан.
 
     :param template_id: Идентификатор шаблона.
     :param body: Поля элемента (kind, title, start_time, end_time, days_of_week, activity_id).
     :param user_id: Идентификатор пользователя из сессии.
     :param schedule_repo: Репозиторий расписаний.
+    :param activity_repo: Репозиторий активностей.
     :returns: Созданный элемент плана.
     """
     template = schedule_repo.get_template_by_id(template_id)
@@ -196,10 +201,18 @@ def create_plan_item(
         raise HTTPException(status_code=403, detail="Нет доступа к шаблону")
     start = _parse_time(body.start_time)
     end = _parse_time(body.end_time)
+    title = (body.title or "").strip() or None
+    if body.kind == "event" and not title and body.activity_id is not None:
+        activity = activity_repo.get_by_id(body.activity_id)
+        if activity is None or activity.user_id != user_id:
+            raise HTTPException(status_code=404, detail="Активность не найдена")
+        title = activity.name
+    if not title:
+        raise HTTPException(status_code=400, detail="Укажите название или активность")
     item = schedule_repo.create_plan_item(
         template_id=template_id,
         kind=body.kind,
-        title=body.title,
+        title=title,
         start_time=start,
         end_time=end,
         days_of_week=body.days_of_week,
@@ -245,14 +258,17 @@ def update_plan_item(
     body: PlanItemUpdate,
     user_id: int = Depends(get_current_user_id),
     schedule_repo: ScheduleRepo = Depends(get_schedule_repo),
+    activity_repo: ActivityRepo = Depends(get_activity_repo),
 ) -> PlanItemResponse:
     """
     Обновить элемент плана (частичное обновление).
+    Для событий при смене activity_id title обновляется из новой активности.
 
     :param plan_item_id: Идентификатор элемента плана.
     :param body: Поля для обновления (все опциональны).
     :param user_id: Идентификатор пользователя из сессии.
     :param schedule_repo: Репозиторий расписаний.
+    :param activity_repo: Репозиторий активностей.
     :returns: Обновлённый элемент плана.
     """
     item = schedule_repo.get_plan_item(plan_item_id)
@@ -267,9 +283,21 @@ def update_plan_item(
     if "end_time" in updates:
         updates["end_time"] = _parse_time(updates["end_time"])
     activity_id = updates.pop("activity_id", _UNSET)
+    if activity_id is None and item.kind == "event":
+        raise HTTPException(
+            status_code=400,
+            detail="Для события activity_id обязателен — без него бот не сможет отслеживать паузу и трекинг",
+        )
+    title = updates.get("title")
+    if item.kind == "event":
+        updates.pop("title", None)
+        if activity_id is not _UNSET and activity_id is not None:
+            activity = activity_repo.get_by_id(activity_id)
+            if activity is not None and activity.user_id == user_id:
+                title = activity.name
     schedule_repo.update_plan_item(
         plan_item_id,
-        title=updates.get("title"),
+        title=title,
         start_time=updates.get("start_time"),
         end_time=updates.get("end_time"),
         days_of_week=updates.get("days_of_week"),

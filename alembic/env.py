@@ -15,15 +15,15 @@ src_path = project_root / "src"
 if str(src_path) not in sys.path:
     sys.path.insert(0, str(src_path))
 
+from control_habits.config import Settings
 from control_habits.storage.models import Base
 
 config = context.config
 target_metadata = Base.metadata
 
-# URL БД: из переменной окружения или из alembic.ini
-database_url = os.environ.get("DATABASE_URL")
-if database_url:
-    config.set_main_option("sqlalchemy.url", database_url)
+# URL БД: из настроек приложения (читает .env) или из alembic.ini
+_settings = Settings()
+config.set_main_option("sqlalchemy.url", _settings.database_url)
 
 
 def run_migrations_offline() -> None:

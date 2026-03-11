@@ -2,7 +2,9 @@
 
 from collections.abc import Callable
 from datetime import datetime, timezone
+
 from aiogram import Router
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Filter
 from aiogram.types import CallbackQuery, Message
 from sqlalchemy.orm import Session
@@ -15,8 +17,7 @@ from control_habits.bot_messages.types import (
 from control_habits.hotkey_sessions import start_session, stop_session
 from control_habits.storage.repositories.activity import ActivityRepo
 from control_habits.storage.repositories.hotkeys import HotkeysRepo
-from control_habits.storage.repositories.logs import LogsRepo
-from control_habits.storage.repositories.sessions import SessionsRepo
+from control_habits.storage.repositories.sessions import TimeSegmentRepo
 from control_habits.storage.repositories.users import UsersRepo
 
 MSG_HOTKEYS_CHOOSE = "Выберите событие:"
@@ -72,7 +73,7 @@ def setup_hotkey_handler(
     router: Router,
     get_deps: Callable[
         [],
-        tuple[UsersRepo, SessionsRepo, ActivityRepo, LogsRepo, Session],
+        tuple[UsersRepo, TimeSegmentRepo, ActivityRepo, Session],
     ],
     get_keyboard_deps: Callable[
         [],
@@ -94,6 +95,12 @@ def setup_hotkey_handler(
 
     if get_keyboard_deps is not None:
 
+        def _get_active_ids(user_id: int, db_session: Session) -> set[int]:
+            """Получить множество activity_id с активными сессиями."""
+            segments_repo = TimeSegmentRepo(db_session)
+            active = segments_repo.list_active(user_id)
+            return {s.activity_id for s in active}
+
         @router.message(lambda m: m.text and m.text.strip() == HOTKEYS_MENU_LABEL)
         async def on_hotkeys_menu_message(message: Message) -> None:
             """По нажатию Reply-кнопки «Горячие клавиши»: сообщение «Выберите событие» и inline-клавиатура hotkeys."""
@@ -106,11 +113,13 @@ def setup_hotkey_handler(
                         "Сначала привяжи аккаунт через /start.",
                     )
                     return
+                active_ids = _get_active_ids(user.id, session)
                 keyboard = build_hotkeys_keyboard(
                     user.id,
                     hotkeys_repo,
                     activity_repo,
                     include_active_button=False,
+                    active_activity_ids=active_ids,
                 )
                 await message.answer(
                     MSG_HOTKEYS_CHOOSE,
@@ -132,11 +141,13 @@ def setup_hotkey_handler(
                         show_alert=True,
                     )
                     return
+                active_ids = _get_active_ids(user.id, session)
                 keyboard = build_hotkeys_keyboard(
                     user.id,
                     hotkeys_repo,
                     activity_repo,
                     include_active_button=False,
+                    active_activity_ids=active_ids,
                 )
                 await callback.answer()
                 if callback.message:
@@ -155,7 +166,7 @@ def setup_hotkey_handler(
             return
 
         telegram_user_id = callback.from_user.id if callback.from_user else 0
-        users_repo, sessions_repo, activity_repo, logs_repo, session = get_deps()
+        users_repo, segments_repo, activity_repo, session = get_deps()
         try:
             user = users_repo.get_by_telegram_id(telegram_user_id)
             if user is None:
@@ -173,45 +184,60 @@ def setup_hotkey_handler(
             now = datetime.now(timezone.utc)
             activity_name = activity.name or "Активность"
 
-            existing = sessions_repo.get_active(user.id, activity_id)
+            existing = segments_repo.get_active(user.id, activity_id)
             if existing is None:
                 start_session(
-                    sessions_repo=sessions_repo,
+                    sessions_repo=segments_repo,
                     user_id=user.id,
                     activity_id=activity_id,
                     now=now,
                 )
-                logs_repo.add(
-                    user_id=user.id,
-                    responded_at=now,
-                    action="session_start",
-                    activity_id=activity_id,
-                )
                 session.commit()
-                await callback.answer(f"{activity_name} включено.", show_alert=False)
+                text = f"▶ {activity_name} включено."
             else:
                 duration = stop_session(
-                    sessions_repo=sessions_repo,
+                    sessions_repo=segments_repo,
                     user_id=user.id,
                     activity_id=activity_id,
                     now=now,
                 )
-                if duration is not None:
-                    logs_repo.add(
-                        user_id=user.id,
-                        responded_at=now,
-                        action="session_end",
-                        activity_id=activity_id,
-                        payload={"duration_seconds": duration},
-                    )
                 session.commit()
                 if duration is not None:
-                    text = f"{activity_name} выключено (шло {_format_duration_minutes(duration)})."
+                    text = f"⏹ {activity_name} выключено (шло {_format_duration_minutes(duration)})."
                 else:
                     text = f"{activity_name} уже было выключено."
-                await callback.answer(text, show_alert=False)
+
+            await callback.answer(text, show_alert=True)
+            await _update_hotkeys_keyboard(callback, user.id)
         except Exception:
             session.rollback()
             raise
         finally:
             session.close()
+
+    async def _update_hotkeys_keyboard(
+        callback: CallbackQuery,
+        user_id: int,
+    ) -> None:
+        """Обновить inline-клавиатуру: пометить активные сессии индикатором."""
+        if get_keyboard_deps is None or not callback.message:
+            return
+        kb_users_repo, hotkeys_repo, kb_activity_repo, kb_session = get_keyboard_deps()
+        try:
+            kb_segments_repo = TimeSegmentRepo(kb_session)
+            active_sessions = kb_segments_repo.list_active(user_id)
+            active_ids = {s.activity_id for s in active_sessions}
+            keyboard = build_hotkeys_keyboard(
+                user_id,
+                hotkeys_repo,
+                kb_activity_repo,
+                include_active_button=False,
+                active_activity_ids=active_ids,
+            )
+            try:
+                await callback.message.edit_reply_markup(reply_markup=keyboard)
+            except TelegramBadRequest as e:
+                if "message is not modified" not in str(e):
+                    raise
+        finally:
+            kb_session.close()

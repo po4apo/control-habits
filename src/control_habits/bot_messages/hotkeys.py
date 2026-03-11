@@ -13,10 +13,14 @@ from control_habits.bot_messages.types import (
     CALLBACK_PREFIX_ACTIVE,
     CALLBACK_PREFIX_ACTIVE_DETAIL,
     CALLBACK_PREFIX_ACTIVE_DETAIL_PLAN,
+    CALLBACK_PREFIX_BUG_CANCEL,
+    CALLBACK_PREFIX_BUG_CONFIRM,
     CALLBACK_PREFIX_FINISH,
     CALLBACK_PREFIX_FINISH_PLAN,
     CALLBACK_PREFIX_HOTKEY,
     CALLBACK_PREFIX_HOTKEYS_MENU,
+    CALLBACK_PREFIX_PAUSE_PLAN,
+    CALLBACK_PREFIX_RESUME_PLAN,
     ActiveSession,
     CurrentlyOnItem,
 )
@@ -38,6 +42,9 @@ ACTIVE_BUTTON_LABEL = "Что включено"
 # Текст кнопки «Горячие клавиши» (меню горячих кнопок)
 HOTKEYS_MENU_LABEL = "Горячие клавиши"
 
+# Текст кнопки отправки баг-репорта в главном меню
+BUG_REPORT_BUTTON_LABEL = "Сообщить о баге"
+
 
 def build_main_menu_keyboard() -> InlineKeyboardMarkup:
     """
@@ -55,7 +62,7 @@ def build_main_menu_keyboard() -> InlineKeyboardMarkup:
 
 def build_main_menu_reply_keyboard() -> ReplyKeyboardMarkup:
     """
-    Reply-клавиатура главного меню: две кнопки под полем ввода — «Что включено» и «Горячие клавиши».
+    Reply-клавиатура главного меню: «Что включено», «Горячие клавиши», «Сообщить о баге».
 
     :returns: ReplyKeyboardMarkup для /start и fallback.
     """
@@ -63,6 +70,7 @@ def build_main_menu_reply_keyboard() -> ReplyKeyboardMarkup:
         keyboard=[
             [KeyboardButton(text=ACTIVE_BUTTON_LABEL)],
             [KeyboardButton(text=HOTKEYS_MENU_LABEL)],
+            [KeyboardButton(text=BUG_REPORT_BUTTON_LABEL)],
         ],
         resize_keyboard=True,
     )
@@ -80,16 +88,17 @@ def build_active_sessions_buttons(items: list[CurrentlyOnItem]) -> InlineKeyboar
     buttons: list[list[InlineKeyboardButton]] = []
     for it in items:
         time_str = it.started_at.strftime("%H:%M")
-        if it.session_id is not None:
-            callback_data = f"{CALLBACK_PREFIX_ACTIVE_DETAIL}{it.session_id}"
-        else:
+        if it.plan_item_id is not None:
             callback_data = f"{CALLBACK_PREFIX_ACTIVE_DETAIL_PLAN}{it.plan_item_id}"
+        else:
+            callback_data = f"{CALLBACK_PREFIX_ACTIVE_DETAIL}{it.session_id}"
         if not _callback_fits(callback_data):
             continue
+        prefix = "⏸ " if it.is_paused else ""
         buttons.append(
             [
                 InlineKeyboardButton(
-                    text=f"{it.title} (с {time_str})",
+                    text=f"{prefix}{it.title} (с {time_str})",
                     callback_data=callback_data,
                 )
             ]
@@ -97,15 +106,27 @@ def build_active_sessions_buttons(items: list[CurrentlyOnItem]) -> InlineKeyboar
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
-def build_session_detail_message(activity_name: str, started_at: datetime) -> str:
+def build_session_detail_message(
+    activity_name: str,
+    started_at: datetime,
+    is_paused: bool = False,
+    paused_at: datetime | None = None,
+) -> str:
     """
-    Текст детали сессии: «Событие {activity_name} идёт с HH:MM».
+    Текст детали сессии.
 
     :param activity_name: Название активности.
-    :param started_at: Время начала (datetime, будет отформатировано как HH:MM).
+    :param started_at: Время начала (datetime).
+    :param is_paused: True если на паузе.
+    :param paused_at: Время постановки на паузу (если is_paused).
     :returns: Строка для сообщения в чат.
     """
     time_str = started_at.strftime("%H:%M")
+    if is_paused and paused_at is not None:
+        pause_str = paused_at.strftime("%H:%M")
+        return f"Событие {activity_name} на паузе (с {time_str}, пауза с {pause_str})."
+    if is_paused:
+        return f"Событие {activity_name} на паузе (с {time_str})."
     return f"Событие {activity_name} идёт с {time_str}."
 
 
@@ -115,24 +136,30 @@ def build_hotkeys_keyboard(
     activity_repo: ActivityRepo,
     *,
     include_active_button: bool = False,
+    active_activity_ids: set[int] | None = None,
 ) -> InlineKeyboardMarkup:
     """
     Клавиатура с hotkey-кнопками пользователя (подписи из Hotkey.label, callback_data: hk_<activity_id>).
+
+    Активные сессии помечаются префиксом ``▶`` на кнопке.
 
     :param user_id: Идентификатор пользователя.
     :param hotkeys_repo: Репозиторий hotkeys (list_by_user).
     :param activity_repo: Не используется для подписей (подпись берётся из Hotkey.label), оставлен для совместимости с контрактом.
     :param include_active_button: Добавить в конец ряд с кнопкой «Что включено» (callback_data act_).
+    :param active_activity_ids: Множество activity_id с активными сессиями; помеченные кнопки получают префикс.
     :returns: InlineKeyboardMarkup с кнопками; callback_data в пределах 64 байт.
     """
+    active_ids = active_activity_ids or set()
     hotkeys = hotkeys_repo.list_by_user(user_id)
     buttons: list[list[InlineKeyboardButton]] = []
     for hk in hotkeys:
         callback_data = f"{CALLBACK_PREFIX_HOTKEY}{hk.activity_id}"
         if not _callback_fits(callback_data):
             continue
+        label = f"▶ {hk.label}" if hk.activity_id in active_ids else hk.label
         buttons.append(
-            [InlineKeyboardButton(text=hk.label, callback_data=callback_data)]
+            [InlineKeyboardButton(text=label, callback_data=callback_data)]
         )
     if include_active_button and _callback_fits(CALLBACK_PREFIX_ACTIVE):
         buttons.append(
@@ -153,8 +180,62 @@ def build_active_sessions_message(items: list[CurrentlyOnItem]) -> str:
     parts = []
     for it in items:
         time_str = it.started_at.strftime("%H:%M")
-        parts.append(f"{it.title} с {time_str}")
+        prefix = "⏸ " if it.is_paused else ""
+        parts.append(f"{prefix}{it.title} с {time_str}")
     return "Сейчас включено: " + "; ".join(parts)
+
+
+def build_bug_confirm_keyboard(draft_id: int) -> InlineKeyboardMarkup:
+    """
+    Inline-кнопки «Отправить» и «Отменить» для подтверждения отправки баг-репорта.
+
+    :param draft_id: Id черновика (для callback_data).
+    :returns: InlineKeyboardMarkup; callback_data в пределах 64 байт.
+    """
+    ok_data = f"{CALLBACK_PREFIX_BUG_CONFIRM}{draft_id}"
+    cn_data = f"{CALLBACK_PREFIX_BUG_CANCEL}{draft_id}"
+    if not _callback_fits(ok_data) or not _callback_fits(cn_data):
+        return InlineKeyboardMarkup(inline_keyboard=[])
+    buttons: list[list[InlineKeyboardButton]] = [
+        [
+            InlineKeyboardButton(text="Отправить", callback_data=ok_data),
+            InlineKeyboardButton(text="Отменить", callback_data=cn_data),
+        ],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def build_detail_buttons(item: CurrentlyOnItem) -> InlineKeyboardMarkup:
+    """
+    Кнопки для детального просмотра: Пауза/Продолжить + Выключить (для запланированных) или только Выключить (для hotkey).
+
+    :param item: Один элемент (hotkey или запланированное).
+    :returns: InlineKeyboardMarkup.
+    """
+    buttons: list[list[InlineKeyboardButton]] = []
+    if item.plan_item_id is not None:
+        if item.is_paused:
+            res_data = f"{CALLBACK_PREFIX_RESUME_PLAN}{item.plan_item_id}"
+            if _callback_fits(res_data):
+                buttons.append(
+                    [InlineKeyboardButton(text="▶ Продолжить", callback_data=res_data)]
+                )
+        else:
+            paus_data = f"{CALLBACK_PREFIX_PAUSE_PLAN}{item.plan_item_id}"
+            if _callback_fits(paus_data):
+                buttons.append(
+                    [InlineKeyboardButton(text="⏸ Пауза", callback_data=paus_data)]
+                )
+    fin_data = (
+        f"{CALLBACK_PREFIX_FINISH_PLAN}{item.plan_item_id}"
+        if item.plan_item_id is not None
+        else f"{CALLBACK_PREFIX_FINISH}{item.session_id}"
+    )
+    if _callback_fits(fin_data):
+        buttons.append(
+            [InlineKeyboardButton(text=f"Выключить {item.title}", callback_data=fin_data)]
+        )
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
 def build_finish_buttons(items: list[CurrentlyOnItem]) -> InlineKeyboardMarkup:

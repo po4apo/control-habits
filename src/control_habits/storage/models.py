@@ -188,14 +188,14 @@ class LogEntry(Base):
         return f"<LogEntry id={self.id} action={self.action}>"
 
 
-class ActiveSession(Base):
-    """Активная (незавершённая) сессия по hotkey-активности."""
+class TimeSegment(Base):
+    """Временной отрезок трекинга: старт/стоп активности (hotkey или запланированное событие)."""
 
-    __tablename__ = "active_sessions"
+    __tablename__ = "time_segments"
 
     __table_args__ = (
         Index(
-            "ix_active_sessions_user_activity_ended",
+            "ix_time_segments_user_activity_ended",
             "user_id",
             "activity_id",
             "ended_at",
@@ -209,6 +209,9 @@ class ActiveSession(Base):
     activity_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("activities.id", ondelete="CASCADE"), nullable=False
     )
+    plan_item_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("plan_items.id", ondelete="SET NULL"), nullable=True
+    )
     started_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
@@ -217,4 +220,30 @@ class ActiveSession(Base):
     )
 
     def __repr__(self) -> str:
-        return f"<ActiveSession id={self.id} user_id={self.user_id} activity_id={self.activity_id}>"
+        return f"<TimeSegment id={self.id} user_id={self.user_id} activity_id={self.activity_id}>"
+
+
+class BugReportDraft(Base):
+    """Черновик баг-репорта: состояние диалога и описание до отправки в GitHub."""
+
+    __tablename__ = "bug_report_drafts"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    telegram_user_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    description: Mapped[str] = mapped_column(String(4096), nullable=False)
+    state: Mapped[str] = mapped_column(
+        String(32), nullable=False
+    )  # waiting_description | waiting_confirm | sent | cancelled
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    github_issue_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
+
+    def __repr__(self) -> str:
+        return f"<BugReportDraft id={self.id} state={self.state}>"

@@ -245,11 +245,23 @@ function renderSchedule(container) {
     });
   }
 
-  function openItemForm(editId = null) {
+  async function openItemForm(editId = null) {
     const item = editId ? items.find((i) => i.id === editId) : null;
     const isEvent = item ? item.kind === 'event' : false;
+    let activities = [];
+    try {
+      activities = await api('/activities');
+    } catch (e) {
+      scheduleError.textContent = e.message;
+      scheduleError.classList.remove('hidden');
+      return;
+    }
+
     const modal = document.createElement('div');
     modal.className = 'modal-overlay';
+    const activityOptions = activities
+      .map((a) => `<option value="${a.id}" ${item?.activity_id === a.id ? 'selected' : ''}>${escapeHtml(a.name)}</option>`)
+      .join('');
     modal.innerHTML = `
       <div class="modal">
         <h2>${item ? 'Редактировать' : 'Добавить'} элемент</h2>
@@ -260,9 +272,21 @@ function renderSchedule(container) {
             <option value="event" ${isEvent ? 'selected' : ''}>Событие</option>
           </select>
         </div>
-        <div class="form-group">
+        <div class="form-group" id="formTitleGroup">
           <label>Название</label>
           <input type="text" id="formTitle" value="${item ? escapeHtml(item.title) : ''}" placeholder="Название">
+        </div>
+        <div class="form-group" id="formActivityGroup">
+          <label>Активность (обязательно для паузы и трекинга)</label>
+          <select id="formActivity">
+            <option value="">— Выберите —</option>
+            ${activityOptions}
+            <option value="new">+ Создать новую</option>
+          </select>
+        </div>
+        <div class="form-group hidden" id="formActivityNameGroup">
+          <label>Название новой активности</label>
+          <input type="text" id="formActivityName" placeholder="Например: Работа, Учёба">
         </div>
         <div class="form-group">
           <label>Время начала</label>
@@ -296,11 +320,34 @@ function renderSchedule(container) {
     }
 
     const kindSelect = modal.querySelector('#formKind');
+    const titleGroup = modal.querySelector('#formTitleGroup');
     const endGroup = modal.querySelector('#formEndGroup');
+    const activityGroup = modal.querySelector('#formActivityGroup');
+    const activitySelect = modal.querySelector('#formActivity');
+    const activityNameGroup = modal.querySelector('#formActivityNameGroup');
+    const activityNameInput = modal.querySelector('#formActivityName');
+
+    function toggleActivityFields() {
+      const isEvent = kindSelect.value === 'event';
+      titleGroup.classList.toggle('hidden', isEvent);
+      activityGroup.classList.toggle('hidden', !isEvent);
+      if (isEvent && activitySelect.value === 'new') {
+        activityNameGroup.classList.remove('hidden');
+      } else {
+        activityNameGroup.classList.add('hidden');
+      }
+    }
+
     kindSelect.addEventListener('change', () => {
       endGroup.classList.toggle('hidden', kindSelect.value !== 'event');
+      toggleActivityFields();
     });
+    activitySelect.addEventListener('change', () => {
+      activityNameGroup.classList.toggle('hidden', activitySelect.value !== 'new');
+    });
+
     endGroup.classList.toggle('hidden', !isEvent);
+    toggleActivityFields();
 
     modal.querySelector('#modalCancel').addEventListener('click', () => modal.remove());
     modal.querySelector('#modalSave').addEventListener('click', async () => {
@@ -310,29 +357,58 @@ function renderSchedule(container) {
       const days = [...modal.querySelectorAll('#formDays input:checked')].map(
         (c) => Number(c.dataset.day)
       );
-      if (!title || days.length === 0) return;
+      if (days.length === 0) return;
+
+      let activityId = null;
+      if (kindSelect.value === 'event') {
+        const actVal = activitySelect.value;
+        if (!actVal) {
+          alert('Выберите активность для события — без неё бот не сможет отслеживать паузу и трекинг');
+          return;
+        }
+        if (actVal === 'new') {
+          const name = activityNameInput.value.trim();
+          if (!name) {
+            alert('Введите название активности');
+            return;
+          }
+          try {
+            const created = await api('/activities', {
+              method: 'POST',
+              body: JSON.stringify({ name, kind: 'regular' }),
+            });
+            activityId = created.id;
+          } catch (e) {
+            alert(e.message);
+            return;
+          }
+        } else if (actVal) {
+          activityId = parseInt(actVal, 10);
+        }
+      } else if (!title) {
+        alert('Введите название дела');
+        return;
+      }
+
+      const payload = {
+        kind: kindSelect.value,
+        start_time: start,
+        end_time: end,
+        days_of_week: days,
+        ...(kindSelect.value === 'task' && { title }),
+        ...(kindSelect.value === 'event' && { activity_id: activityId }),
+      };
+
       try {
         if (item) {
           await api(`/schedule/plan-items/${item.id}`, {
             method: 'PATCH',
-            body: JSON.stringify({
-              kind: kindSelect.value,
-              title,
-              start_time: start,
-              end_time: end,
-              days_of_week: days,
-            }),
+            body: JSON.stringify(payload),
           });
         } else {
           await api(`/schedule/template/${templateId}/items`, {
             method: 'POST',
-            body: JSON.stringify({
-              kind: kindSelect.value,
-              title,
-              start_time: start,
-              end_time: end,
-              days_of_week: days,
-            }),
+            body: JSON.stringify(payload),
           });
         }
         modal.remove();
@@ -457,7 +533,7 @@ function renderHotkeys(container) {
       <div class="table-wrap">
         <table>
           <thead>
-            <tr><th>Активность</th><th>Подпись на кнопке</th><th>Порядок</th><th>Действия</th></tr>
+            <tr><th>Название</th><th>Действия</th></tr>
           </thead>
           <tbody id="hotkeysBody"></tbody>
         </table>
@@ -471,23 +547,15 @@ function renderHotkeys(container) {
   const hotkeysError = document.getElementById('hotkeysError');
 
   let hotkeys = [];
-  let activities = [];
 
   async function load() {
     try {
-      [hotkeys, activities] = await Promise.all([
-        api('/activities/hotkeys'),
-        api('/activities'),
-      ]);
-      const hotkeyActivities = activities.filter((a) => a.kind === 'hotkey');
-      const byId = Object.fromEntries(activities.map((a) => [a.id, a]));
+      hotkeys = await api('/activities/hotkeys');
       tbody.innerHTML = hotkeys
         .map(
-          (h, idx) => `
+          (h) => `
           <tr>
-            <td>${escapeHtml(byId[h.activity_id]?.name || '—')}</td>
-            <td>${escapeHtml(h.label)}</td>
-            <td>${idx + 1}</td>
+            <td>${escapeHtml(h.name || h.label)}</td>
             <td class="table-actions">
               <button type="button" class="btn btn-secondary" data-up="${h.id}" title="Выше">↑</button>
               <button type="button" class="btn btn-secondary" data-down="${h.id}" title="Ниже">↓</button>
@@ -544,27 +612,33 @@ function renderHotkeys(container) {
     }
   }
 
-  btnAdd.addEventListener('click', () => {
+  btnAdd.addEventListener('click', async () => {
+    let activities = [];
+    try {
+      activities = await api('/activities');
+    } catch (e) {
+      alert(e.message);
+      return;
+    }
+    const usedActivityIds = new Set(hotkeys.map((h) => h.activity_id));
+    const available = activities.filter((a) => !usedActivityIds.has(a.id));
+
     const modal = document.createElement('div');
     modal.className = 'modal-overlay';
-    const hotkeyActivities = activities.filter((a) => a.kind === 'hotkey');
-    const alreadyIds = new Set(hotkeys.map((h) => h.activity_id));
-    const available = hotkeyActivities.filter((a) => !alreadyIds.has(a.id));
     modal.innerHTML = `
       <div class="modal">
         <h2>Добавить кнопку</h2>
         <div class="form-group">
-          <label>Активность</label>
-          <select id="addActivityId">
-            ${available.length ? available.map((a) => `<option value="${a.id}">${escapeHtml(a.name)}</option>`).join('') : '<option value="">— Нет доступных —</option>'}
+          <label>Выберите событие</label>
+          <select id="addSelect">
+            <option value="">— Выберите или создайте новую —</option>
+            ${available.map((a) => `<option value="a${a.id}">${escapeHtml(a.name)}</option>`).join('')}
+            <option value="new">+ Создать новую</option>
           </select>
         </div>
-        <div class="form-group">
-          <label>Подпись на кнопке</label>
-          <input type="text" id="addLabel" placeholder="Текст кнопки">
-        </div>
-        <div class="form-group text-muted" style="font-size: 0.85rem;">
-          Или создать новую активность: <input type="text" id="newActivityName" placeholder="Название" style="max-width: 140px;"> <button type="button" class="btn btn-secondary" id="btnCreateActivity">Создать и добавить</button>
+        <div class="form-group hidden" id="addNameGroup">
+          <label>Название новой активности</label>
+          <input type="text" id="addName" placeholder="Например: YouTube, Работа, Чтение">
         </div>
         <div class="modal-actions">
           <button type="button" class="btn" id="addSave">Добавить</button>
@@ -572,33 +646,43 @@ function renderHotkeys(container) {
         </div>
       </div>
     `;
-    modal.querySelector('#addCancel').addEventListener('click', () => modal.remove());
-    modal.querySelector('#addSave').addEventListener('click', async () => {
-      const activityId = Number(modal.querySelector('#addActivityId').value);
-      const label = modal.querySelector('#addLabel').value.trim();
-      if (!activityId || !label) return;
-      try {
-        await api('/activities/hotkeys', {
-          method: 'POST',
-          body: JSON.stringify({ activity_id: activityId, label }),
-        });
-        modal.remove();
-        load();
-      } catch (e) {
-        alert(e.message);
+
+    const selectEl = modal.querySelector('#addSelect');
+    const nameGroup = modal.querySelector('#addNameGroup');
+    const nameInput = modal.querySelector('#addName');
+
+    selectEl.addEventListener('change', () => {
+      if (selectEl.value === 'new') {
+        nameGroup.classList.remove('hidden');
+        nameInput.required = true;
+      } else {
+        nameGroup.classList.add('hidden');
+        nameInput.required = false;
       }
     });
-    modal.querySelector('#btnCreateActivity').addEventListener('click', async () => {
-      const name = modal.querySelector('#newActivityName').value.trim();
-      if (!name) return;
+
+    modal.querySelector('#addCancel').addEventListener('click', () => modal.remove());
+
+    modal.querySelector('#addSave').addEventListener('click', async () => {
+      const val = selectEl.value;
+      let body;
+      if (val === 'new') {
+        const name = nameInput.value.trim();
+        if (!name) {
+          alert('Введите название');
+          return;
+        }
+        body = { name };
+      } else if (val.startsWith('a')) {
+        body = { activity_id: parseInt(val.slice(1), 10) };
+      } else {
+        alert('Выберите событие или создайте новую');
+        return;
+      }
       try {
-        const activity = await api('/activities', {
-          method: 'POST',
-          body: JSON.stringify({ name, kind: 'hotkey' }),
-        });
         await api('/activities/hotkeys', {
           method: 'POST',
-          body: JSON.stringify({ activity_id: activity.id, label: name }),
+          body: JSON.stringify(body),
         });
         modal.remove();
         load();

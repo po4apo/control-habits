@@ -2,7 +2,7 @@
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 ActivityKind = Literal["hotkey", "regular"]
 
@@ -32,19 +32,36 @@ class ActivityResponse(BaseModel):
 
 
 class HotkeyCreate(BaseModel):
-    """Тело запроса добавления hotkey-кнопки."""
+    """Тело запроса добавления hotkey-кнопки: выбор существующей активности или создание новой."""
 
-    activity_id: int = Field(..., description="Идентификатор активности")
-    label: str = Field(..., min_length=1, max_length=128, description="Подпись на кнопке")
+    activity_id: int | None = Field(
+        None,
+        description="ID существующей активности (если не задано — создать по name)",
+    )
+    name: str | None = Field(
+        None,
+        min_length=1,
+        max_length=128,
+        description="Название для новой активности (если activity_id не задан)",
+    )
+
+    @model_validator(mode="after")
+    def require_activity_or_name(self) -> "HotkeyCreate":
+        if self.activity_id is not None and self.name is not None:
+            raise ValueError("Укажите либо activity_id, либо name")
+        if self.activity_id is None and (not self.name or not self.name.strip()):
+            raise ValueError("Укажите activity_id или name")
+        return self
 
 
 class HotkeyResponse(BaseModel):
-    """Ответ: hotkey-кнопка (с названием активности для удобства)."""
+    """Ответ: hotkey-кнопка."""
 
     id: int
     activity_id: int
     label: str
     order: int
+    name: str = ""
 
     model_config = {"from_attributes": True}
 

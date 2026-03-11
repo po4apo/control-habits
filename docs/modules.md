@@ -24,7 +24,8 @@
 **Назначение**: модели и развёртка шаблона в «план на дату».
 
 **DTO/модели**:
-- `TaskItem`, `EventItem` (kind, title, start_time, end_time, days_of_week, activity_id?).
+- `TaskItem` (kind=task, title, start_time, end_time, days_of_week, activity_id?).
+- `EventItem` (kind=event, title из activity, start_time, end_time, days_of_week, activity_id обязателен).
 - `ScheduleTemplate`, `DayOfWeek` (enum или битмаска).
 - `PlannedItem`: элемент, развёрнутый на конкретную дату (plan_item_id, date, planned_at для старта/конца, type: task | event_start | event_end).
 
@@ -69,13 +70,13 @@
 - `build_hotkeys_keyboard(user_id: int) -> ReplyKeyboardMarkup | InlineKeyboardMarkup`  
   Список hotkey-кнопок пользователя (из HotkeysRepo/ActivityRepo); подписи и callback_data или данные для reply-клавиатуры.
 
-- `build_active_sessions_message(sessions: list[ActiveSession]) -> str`  
+- `build_active_sessions_message(items: list[CurrentlyOnItem]) -> str`  
   Текст списка: например, «Сейчас идёт: YouTube с 14:30; Работа с 09:00».
 
-- `build_finish_buttons(sessions: list[ActiveSession]) -> InlineKeyboardMarkup`  
-  По одной кнопке «Закончить [название]» на каждую сессию; callback_data содержит session_id или пару (user_id, activity_id) в пределах 64 байт.
+- `build_finish_buttons(items: list[CurrentlyOnItem]) -> InlineKeyboardMarkup`  
+  По одной кнопке «Закончить [название]» / «Пауза» на каждый активный отрезок; callback_data содержит segment_id или activity_id в пределах 64 байт.
 
-**Зависимости**: модели PlannedItem, ActiveSession; при сборке callback — знание формата payload (короткие префиксы + id).
+**Зависимости**: модели PlannedItem, CurrentlyOnItem (из TimeSegment); при сборке callback — знание формата payload (короткие префиксы + id).
 
 ---
 
@@ -89,8 +90,8 @@
 
 **Логика**:
 - Ответ на пуш: проверка идемпотентности по ключу; запись LogEntry с `responded_at=now()`; обновление сообщения; `answer_callback_query`.
-- Hotkey: вызов hotkey_sessions.start_session / stop_session; запись LogEntry; ответ пользователю.
-- `/active`: вызов hotkey_sessions.list_active_sessions; build_active_sessions_message + build_finish_buttons; отправка сообщения.
+- Hotkey: вызов hotkey_sessions.start_session / stop_session / pause_session / resume_session; ответ пользователю.
+- `/active`: вызов hotkey_sessions.list_active (по TimeSegment); build_active_sessions_message + build_finish_buttons; отправка сообщения.
 - `/start <code>`: вызов auth_linking.consume_link_code; ответ в чат.
 
 **Выход**: побочные эффекты (запись в БД, отправка/редактирование сообщений). Без дублей при повторном callback (идемпотентность).
@@ -99,23 +100,29 @@
 
 ---
 
-## 6. hotkey_sessions (интервалы по кнопкам)
+## 6. hotkey_sessions (интервалы по кнопкам и событиям)
 
-**Назначение**: старт/стоп сессии и список активных.
+**Назначение**: старт/стоп/пауза сессии и список активных отрезков.
 
 **Входы**:
-- `start_session(user_id: int, activity_id: int, now: datetime) -> int`  
-  Создаёт запись ActiveSession, возвращает session_id. Если уже есть активная по этой активности — можно вернуть существующий id или считать идемпотентным «повторный старт» (зависит от продукта).
+- `start_session(user_id: int, activity_id: int, plan_item_id: int | None, now: datetime) -> TimeSegment`  
+  Создаёт TimeSegment с `ended_at IS NULL`. Если уже есть активный по (user_id, activity_id) или (user_id, plan_item_id) — идемпотентно.
 
 - `stop_session(user_id: int, activity_id: int, now: datetime) -> float | None`  
-  Устанавливает `ended_at = now` у активной сессии, возвращает длительность в секундах. Если активной нет — возврат None (идемпотентно).
+  Устанавливает `ended_at = now` у активного отрезка, возвращает длительность. Идемпотентно.
 
-- `list_active_sessions(user_id: int) -> list[ActiveSession]`  
-  Все сессии пользователя с `ended_at IS NULL`, с подгрузкой названий активностей.
+- `pause_session(user_id: int, activity_id: int, now: datetime)`  
+  Закрыть текущий отрезок (пауза). Перерыв не учитывается в длительности.
 
-**Инварианты**: одна активная сессия на пару (user_id, activity_id).
+- `resume_session(user_id: int, activity_id: int, plan_item_id: int | None, now: datetime)`  
+  Создать новый отрезок (продолжение после паузы).
 
-**Зависимости**: SessionsRepo, ActivityRepo.
+- `list_active(user_id: int) -> list[TimeSegment]`  
+  Все отрезки с `ended_at IS NULL`, с подгрузкой названий активностей.
+
+**Инварианты**: один активный отрезок на пару (user_id, activity_id) или (user_id, plan_item_id) для событий.
+
+**Зависимости**: TimeSegmentRepo, ActivityRepo.
 
 ---
 
@@ -125,9 +132,9 @@
 
 **Входы**:
 - `get_daily_report(user_id: int, date: date) -> DailyReport`  
-  Структура: список запланированного (planned items + типы), список фактов ответов (LogEntry с временем и статусом), список интервалов (сессии с started_at/ended_at за эту дату, длительности).
+  Структура: список запланированного (planned items + типы), список фактов ответов (LogEntry), список интервалов (TimeSegment с started_at/ended_at за эту дату, длительности).
 
-**Зависимости**: ScheduleRepo (или schedule_model.expand_template), LogsRepo, SessionsRepo (или слой, возвращающий закрытые сессии за дату).
+**Зависимости**: ScheduleRepo, LogsRepo, TimeSegmentRepo.
 
 ---
 
@@ -143,7 +150,7 @@
 - **HotkeysRepo**: list_by_user, add, remove, reorder.
 - **NotificationsRepo**: create_many, get_pending(planned_at <= until), mark_sent.
 - **LogsRepo**: add, exists_by_idempotency_key (или по notification_id).
-- **SessionsRepo**: create, get_active(user_id, activity_id), list_active(user_id), close(session_id, ended_at).
+- **TimeSegmentRepo**: create, close, get_open, get_open_by_plan_item, list_open, list_segments_in_range.
 
 Все даты/времена на границе репозиториев — в UTC.
 
