@@ -12,6 +12,10 @@ CALLBACK_PREFIX_ACTIVE_DETAIL_PLAN = "actd_plan_"  # деталь заплани
 CALLBACK_PREFIX_FINISH_PLAN = "fin_plan_"  # выключить запланированное событие: fin_plan_<plan_item_id>
 CALLBACK_PREFIX_HOTKEYS_MENU = "hkmenu_"  # открытие меню горячих клавиш
 
+# Баг-репорт: подтверждение отправки / отмена
+CALLBACK_PREFIX_BUG_CONFIRM = "bug_ok_"  # bug_ok_<draft_id>
+CALLBACK_PREFIX_BUG_CANCEL = "bug_cn_"  # bug_cn_<draft_id>
+
 # Ответы на пуши: callback_data = префикс + str(notification_id).
 # bot_handlers: парсить префикс → action, суффикс → notification_id; проверять идемпотентность по notification_id перед записью LogEntry.
 CALLBACK_PREFIX_TASK_DONE = "td_"  # td_<notification_id>

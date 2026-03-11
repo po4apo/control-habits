@@ -3,11 +3,13 @@
 from control_habits.bot_messages.hotkeys import (
     build_active_sessions_buttons,
     build_active_sessions_message,
+    build_bug_confirm_keyboard,
     build_finish_buttons,
     build_hotkeys_keyboard,
     build_main_menu_keyboard,
     build_main_menu_reply_keyboard,
     build_session_detail_message,
+    BUG_REPORT_BUTTON_LABEL,
     HOTKEYS_MENU_LABEL,
 )
 from control_habits.bot_messages.prompts import (
@@ -18,6 +20,8 @@ from control_habits.bot_messages.prompts import (
 from control_habits.bot_messages.types import (
     CALLBACK_PREFIX_ACTIVE_DETAIL,
     CALLBACK_PREFIX_ACTIVE_DETAIL_PLAN,
+    CALLBACK_PREFIX_BUG_CANCEL,
+    CALLBACK_PREFIX_BUG_CONFIRM,
     CALLBACK_PREFIX_EVENT_ENDED,
     CALLBACK_PREFIX_EVENT_NOT_STARTED,
     CALLBACK_PREFIX_EVENT_SKIPPED,
@@ -38,6 +42,8 @@ __all__ = [
     "CurrentlyOnItem",
     "CALLBACK_PREFIX_ACTIVE_DETAIL",
     "CALLBACK_PREFIX_ACTIVE_DETAIL_PLAN",
+    "CALLBACK_PREFIX_BUG_CANCEL",
+    "CALLBACK_PREFIX_BUG_CONFIRM",
     "CALLBACK_PREFIX_EVENT_ENDED",
     "CALLBACK_PREFIX_EVENT_NOT_STARTED",
     "CALLBACK_PREFIX_EVENT_SKIPPED",
@@ -51,6 +57,7 @@ __all__ = [
     "CALLBACK_PREFIX_TASK_SKIP",
     "build_active_sessions_buttons",
     "build_active_sessions_message",
+    "build_bug_confirm_keyboard",
     "build_event_end_prompt",
     "build_event_start_prompt",
     "build_finish_buttons",
@@ -58,6 +65,7 @@ __all__ = [
     "build_main_menu_keyboard",
     "build_main_menu_reply_keyboard",
     "build_session_detail_message",
+    "BUG_REPORT_BUTTON_LABEL",
     "HOTKEYS_MENU_LABEL",
     "build_task_prompt",
 ]

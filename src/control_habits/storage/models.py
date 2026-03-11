@@ -218,3 +218,29 @@ class ActiveSession(Base):
 
     def __repr__(self) -> str:
         return f"<ActiveSession id={self.id} user_id={self.user_id} activity_id={self.activity_id}>"
+
+
+class BugReportDraft(Base):
+    """Черновик баг-репорта: состояние диалога и описание до отправки в GitHub."""
+
+    __tablename__ = "bug_report_drafts"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    telegram_user_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    description: Mapped[str] = mapped_column(String(4096), nullable=False)
+    state: Mapped[str] = mapped_column(
+        String(32), nullable=False
+    )  # waiting_description | waiting_confirm | sent | cancelled
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    github_issue_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
+
+    def __repr__(self) -> str:
+        return f"<BugReportDraft id={self.id} state={self.state}>"

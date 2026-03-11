@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from control_habits.auth_linking import AuthLinkingService
 from control_habits.bot.active_handler import setup_active_handler
+from control_habits.bot.bug_report_handler import setup_bug_report_handler
 from control_habits.bot.fallback_handler import setup_fallback_handler
 from control_habits.bot.hotkey_handler import setup_hotkey_handler
 from control_habits.bot.push_callback_handler import setup_push_callback_handler
@@ -21,6 +22,7 @@ from control_habits.bot.start_handler import setup_start_handler
 from control_habits.config import Settings
 from control_habits.scheduler import PushSchedulerService
 from control_habits.storage.repositories.activity import ActivityRepo
+from control_habits.storage.repositories.bug_report_drafts import BugReportDraftRepo
 from control_habits.storage.repositories.hotkeys import HotkeysRepo
 from control_habits.storage.repositories.link_codes import LinkCodesRepo
 from control_habits.storage.repositories.logs import LogsRepo
@@ -106,6 +108,13 @@ def run_polling() -> None:
         activity_repo = ActivityRepo(session)
         return users_repo, hotkeys_repo, activity_repo, session
 
+    def get_bug_report_deps() -> tuple[UsersRepo, BugReportDraftRepo, Session]:
+        """Репозитории для диалога баг-репорта."""
+        session = session_factory()
+        users_repo = UsersRepo(session)
+        drafts_repo = BugReportDraftRepo(session)
+        return users_repo, drafts_repo, session
+
     bot = Bot(
         token=settings.bot_token,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
@@ -121,6 +130,12 @@ def run_polling() -> None:
     setup_push_callback_handler(router, get_push_callback_deps)
     setup_hotkey_handler(router, get_session_deps, get_keyboard_deps=get_keyboard_deps)
     setup_active_handler(router, get_active_deps)
+    setup_bug_report_handler(
+        router,
+        get_deps=get_bug_report_deps,
+        github_token=settings.github_token,
+        github_repo=settings.github_repo,
+    )
     setup_fallback_handler(router, get_keyboard_deps=get_keyboard_deps)
     dp.include_router(router)
 

@@ -31,3 +31,9 @@ class Settings(BaseSettings):
 
     scheduler_interval_seconds: int = 60
     """Интервал тика планировщика пушей (секунды)."""
+
+    github_token: str = ""
+    """Personal Access Token для создания Issue в GitHub (GITHUB_TOKEN). Права: public_repo или repo."""
+
+    github_repo: str = "po4apo/control-habits"
+    """Репозиторий для баг-репортов в формате owner/repo (GITHUB_REPO)."""

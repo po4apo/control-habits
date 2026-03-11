@@ -13,6 +13,8 @@ from control_habits.bot_messages.types import (
     CALLBACK_PREFIX_ACTIVE,
     CALLBACK_PREFIX_ACTIVE_DETAIL,
     CALLBACK_PREFIX_ACTIVE_DETAIL_PLAN,
+    CALLBACK_PREFIX_BUG_CANCEL,
+    CALLBACK_PREFIX_BUG_CONFIRM,
     CALLBACK_PREFIX_FINISH,
     CALLBACK_PREFIX_FINISH_PLAN,
     CALLBACK_PREFIX_HOTKEY,
@@ -38,6 +40,9 @@ ACTIVE_BUTTON_LABEL = "Что включено"
 # Текст кнопки «Горячие клавиши» (меню горячих кнопок)
 HOTKEYS_MENU_LABEL = "Горячие клавиши"
 
+# Текст кнопки отправки баг-репорта в главном меню
+BUG_REPORT_BUTTON_LABEL = "Сообщить о баге"
+
 
 def build_main_menu_keyboard() -> InlineKeyboardMarkup:
     """
@@ -55,7 +60,7 @@ def build_main_menu_keyboard() -> InlineKeyboardMarkup:
 
 def build_main_menu_reply_keyboard() -> ReplyKeyboardMarkup:
     """
-    Reply-клавиатура главного меню: две кнопки под полем ввода — «Что включено» и «Горячие клавиши».
+    Reply-клавиатура главного меню: «Что включено», «Горячие клавиши», «Сообщить о баге».
 
     :returns: ReplyKeyboardMarkup для /start и fallback.
     """
@@ -63,6 +68,7 @@ def build_main_menu_reply_keyboard() -> ReplyKeyboardMarkup:
         keyboard=[
             [KeyboardButton(text=ACTIVE_BUTTON_LABEL)],
             [KeyboardButton(text=HOTKEYS_MENU_LABEL)],
+            [KeyboardButton(text=BUG_REPORT_BUTTON_LABEL)],
         ],
         resize_keyboard=True,
     )
@@ -155,6 +161,26 @@ def build_active_sessions_message(items: list[CurrentlyOnItem]) -> str:
         time_str = it.started_at.strftime("%H:%M")
         parts.append(f"{it.title} с {time_str}")
     return "Сейчас включено: " + "; ".join(parts)
+
+
+def build_bug_confirm_keyboard(draft_id: int) -> InlineKeyboardMarkup:
+    """
+    Inline-кнопки «Отправить» и «Отменить» для подтверждения отправки баг-репорта.
+
+    :param draft_id: Id черновика (для callback_data).
+    :returns: InlineKeyboardMarkup; callback_data в пределах 64 байт.
+    """
+    ok_data = f"{CALLBACK_PREFIX_BUG_CONFIRM}{draft_id}"
+    cn_data = f"{CALLBACK_PREFIX_BUG_CANCEL}{draft_id}"
+    if not _callback_fits(ok_data) or not _callback_fits(cn_data):
+        return InlineKeyboardMarkup(inline_keyboard=[])
+    buttons: list[list[InlineKeyboardButton]] = [
+        [
+            InlineKeyboardButton(text="Отправить", callback_data=ok_data),
+            InlineKeyboardButton(text="Отменить", callback_data=cn_data),
+        ],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
 def build_finish_buttons(items: list[CurrentlyOnItem]) -> InlineKeyboardMarkup:
