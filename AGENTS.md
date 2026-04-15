@@ -12,7 +12,7 @@
   - `docs/system-design.md` — архитектура, потоки, БД, планировщик.
   - `docs/modules.md` — **разбиение на модули с интерфейсами и рекомендуемым порядком реализации**.
   - `docs/ui-telegram.md`, `docs/ui-web.md` — схемы UI.
-  - **`docs/prompts.md`** — готовые промпты на каждую подзадачу (копировать в чат или под-агента).
+  - `**docs/prompts.md`** — готовые промпты на каждую подзадачу (копировать в чат или под-агента).
 
 При реализации всегда опираться на эти файлы; при расхождении — уточнять по ним.
 
@@ -24,17 +24,19 @@
 
 ### Эпики (модули) в порядке реализации
 
-| № | Модуль | Кратко | Задачи (примеры) |
-|---|--------|--------|------------------|
-| 1 | **storage** | Модели БД, миграции, репозитории | SQLAlchemy-модели, Alembic, UsersRepo, LinkCodesRepo, ScheduleRepo, ActivityRepo, HotkeysRepo, NotificationsRepo, LogsRepo, SessionsRepo |
-| 2 | **auth_linking** | Код привязки сайт ↔ Telegram | create_link_code, consume_link_code, эндпоинты API, интеграция с ботом `/start <code>` |
-| 3 | **schedule_model** | Развёртка шаблона на дату | DTO (TaskItem, EventItem, PlannedItem), expand_template(user_id, date) с учётом timezone |
-| 4 | **planning_engine** | Что и когда пушить | build_notification_jobs, запись в notifications с idempotency_key |
-| 5 | **bot_messages** | Тексты и клавиатуры для Telegram | build_task_prompt, build_event_start/end_prompt, build_hotkeys_keyboard, build_active_sessions_message, build_finish_buttons (лимит callback_data 64 байта) |
-| 6 | **hotkey_sessions** | Старт/стоп/список сессий | start_session, stop_session, list_active_sessions, инвариант одна активная сессия на (user_id, activity_id) |
-| 7 | **bot_handlers** | Обработка апдейтов бота | Роутинг callback, пуши, hotkey, /active, /start; идемпотентность ответов |
-| 8 | **reporting** | Отчёт за день | get_daily_report(user_id, date) — planned, answers, durations |
-| 9 | **scheduler** | Отправка пушей по расписанию | APScheduler или цикл: выборка pending notifications, отправка через Bot API, mark_sent, ретраи |
+
+| №   | Модуль              | Кратко                           | Задачи (примеры)                                                                                                                                            |
+| --- | ------------------- | -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | **storage**         | Модели БД, миграции, репозитории | SQLAlchemy-модели, Alembic, UsersRepo, LinkCodesRepo, ScheduleRepo, ActivityRepo, HotkeysRepo, NotificationsRepo, LogsRepo, SessionsRepo                    |
+| 2   | **auth_linking**    | Код привязки сайт ↔ Telegram     | create_link_code, consume_link_code, эндпоинты API, интеграция с ботом `/start <code>`                                                                      |
+| 3   | **schedule_model**  | Развёртка шаблона на дату        | DTO (TaskItem, EventItem, PlannedItem), expand_template(user_id, date) с учётом timezone                                                                    |
+| 4   | **planning_engine** | Что и когда пушить               | build_notification_jobs, запись в notifications с idempotency_key                                                                                           |
+| 5   | **bot_messages**    | Тексты и клавиатуры для Telegram | build_task_prompt, build_event_start/end_prompt, build_hotkeys_keyboard, build_active_sessions_message, build_finish_buttons (лимит callback_data 64 байта) |
+| 6   | **hotkey_sessions** | Старт/стоп/список сессий         | start_session, stop_session, list_active_sessions, инвариант одна активная сессия на (user_id, activity_id)                                                 |
+| 7   | **bot_handlers**    | Обработка апдейтов бота          | Роутинг callback, пуши, hotkey, /active, /start; идемпотентность ответов                                                                                    |
+| 8   | **reporting**       | Отчёт за день                    | get_daily_report(user_id, date) — planned, answers, durations                                                                                               |
+| 9   | **scheduler**       | Отправка пушей по расписанию     | APScheduler или цикл: выборка pending notifications, отправка через Bot API, mark_sent, ретраи                                                              |
+
 
 Дополнительно (сквозные):
 
@@ -69,12 +71,10 @@
   - **Параллельно**: независимые подзадачи (например, «напиши тесты к модулю X» и «добавь миграцию для таблицы Y»), когда одна не зависит от другой.
   - **Отдельный исследовательский агент**: разобрать большой кусок кода или документации (например, «по docs и коду перечисли все места, где нужна идемпотентность») — тип `explore` или `generalPurpose`.
   - **Терминал/скрипты**: запуск миграций, тестов, линтеров — тип `shell`.
-
 - **Типы под-агентов**:
   - **explore**: быстрый обзор кодовой базы, поиск по паттернам, ответы «где что лежит».
   - **generalPurpose**: поиск, исследование, многошаговые задачи (например, «реализуй по modules.md репозитории из storage»).
   - **shell**: выполнение команд (pytest, alembic, форматеры).
-
 - **Как не дублировать работу**:
   - Чётко указывать в описании задачи границы: «только модели и миграции, без API».
   - Сначала реализовать зависимости (например, storage), потом модули, которые от него зависят (auth_linking, schedule_model и т.д.).
