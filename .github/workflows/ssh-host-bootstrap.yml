@@ -1,0 +1,120 @@
+# Первичная выкладка: каталог на хосте, docker-compose.full.yml и .env с раннера, pull/up/миграции.
+# Предпосылки на хосте: docker и docker-compose в PATH. Секреты: DEPLOY_SSH_PRIVATE_KEY, DEPLOY_ENV.
+
+name: Первичный деплой на хост (SSH)
+
+on:
+  workflow_dispatch:
+    inputs:
+      ssh_host:
+        description: "Хост (IP или DNS)"
+        required: true
+        type: string
+      ssh_user:
+        description: "Пользователь SSH"
+        required: true
+        default: "ubuntu"
+        type: string
+      ssh_port:
+        description: "Порт SSH"
+        required: false
+        default: "22"
+        type: string
+      remote_path:
+        description: "Абсолютный путь каталога деплоя (без ~)"
+        required: true
+        default: "/home/ubuntu/control-habits-deploy"
+        type: string
+      image_tag:
+        description: "Тег образов api/bot в ghcr (v0.2.0 или latest)"
+        required: true
+        type: string
+      git_ref:
+        description: "Ветка или тег репозитория для взятия docker-compose.full.yml"
+        required: false
+        default: "main"
+        type: string
+
+concurrency:
+  group: bootstrap-ssh-${{ github.event.inputs.ssh_host }}
+  cancel-in-progress: false
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.git_ref }}
+
+      - name: Собрать .env на раннере (не выводить содержимое)
+        run: |
+          if [ -z "${DEPLOY_ENV:-}" ]; then
+            echo "::error::Секрет DEPLOY_ENV не задан или пуст. Добавьте его в Settings → Secrets → Actions."
+            exit 1
+          fi
+          printf '%s' "$DEPLOY_ENV" > .env
+        env:
+          DEPLOY_ENV: ${{ secrets.DEPLOY_ENV }}
+
+      - name: Создать каталог на хосте
+        uses: appleboy/ssh-action@v1.2.5
+        with:
+          host: ${{ inputs.ssh_host }}
+          username: ${{ inputs.ssh_user }}
+          port: ${{ inputs.ssh_port }}
+          key: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
+          script_stop: true
+          script: |
+            set -euo pipefail
+            mkdir -p "${{ inputs.remote_path }}"
+
+      - name: Копировать compose и .env на хост
+        uses: appleboy/scp-action@v1.0.0
+        with:
+          host: ${{ inputs.ssh_host }}
+          username: ${{ inputs.ssh_user }}
+          port: ${{ inputs.ssh_port }}
+          key: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
+          source: "docker-compose.full.yml,.env"
+          target: ${{ inputs.remote_path }}/
+
+      - name: Вход в ghcr (если заданы секреты), pull, up, миграции
+        uses: appleboy/ssh-action@v1.2.5
+        env:
+          GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+        with:
+          host: ${{ inputs.ssh_host }}
+          username: ${{ inputs.ssh_user }}
+          port: ${{ inputs.ssh_port }}
+          key: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
+          envs: GHCR_USERNAME,GHCR_TOKEN
+          script_stop: true
+          script: |
+            set -euo pipefail
+            if ! command -v docker >/dev/null 2>&1; then
+              echo "::error::На хосте нет docker в PATH"
+              exit 1
+            fi
+            if ! command -v docker-compose >/dev/null 2>&1; then
+              echo "::error::На хосте нет docker-compose в PATH"
+              exit 1
+            fi
+            cd "${{ inputs.remote_path }}"
+            if [ -n "${GHCR_TOKEN:-}" ]; then
+              if [ -z "${GHCR_USERNAME:-}" ]; then
+                echo "::error::Задан GHCR_TOKEN, но не задан GHCR_USERNAME в секретах репозитория"
+                exit 1
+              fi
+              printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
+            fi
+            export COMPOSE_IMAGE_TAG="${{ inputs.image_tag }}"
+            docker-compose -f docker-compose.full.yml pull
+            docker-compose -f docker-compose.full.yml up -d
+            docker-compose -f docker-compose.full.yml run --rm api uv run alembic upgrade head
+            docker-compose -f docker-compose.full.yml up -d api bot
+
+      - name: Удалить .env с раннера
+        if: always()
+        run: rm -f .env

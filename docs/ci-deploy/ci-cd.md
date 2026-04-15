@@ -16,3 +16,10 @@
 После мержа PR в `main`: **Actions** → workflow **«Выпуск тега (ручной)»** ([manual-release-tag.yml](../../.github/workflows/manual-release-tag.yml)) → **Run workflow** → ввести тег (например `v0.1.0`, с префиксом `v`). Workflow создаёт аннотированный тег на текущем `main` и пушит его; затем [build-push.yml](../../.github/workflows/build-push.yml) собирает образы с этим тегом в ghcr.io.
 
 Альтернатива — создать тег локально или в UI и запушить вручную. При необходимости оформить **GitHub Release** с заметками. Версию в `pyproject.toml` держать в актуальном состоянии с тегом.
+
+## Деплой на Ubuntu-хост (полный стек, БД в контейнере)
+
+Два ручных workflow, порядок и секреты — в [Деплой](deploy.md):
+
+1. [ssh-host-bootstrap.yml](../../.github/workflows/ssh-host-bootstrap.yml) — первичная выкладка.
+2. [manual-deploy-ssh.yml](../../.github/workflows/manual-deploy-ssh.yml) — обновление образов и миграций.

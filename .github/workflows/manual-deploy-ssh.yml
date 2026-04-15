@@ -1,0 +1,80 @@
+# Обновление уже развёрнутого стека (docker-compose.full.yml и .env на хосте).
+# Предпосылки: первичный деплой через «Первичный деплой на хост (SSH)».
+
+name: Обновление стека (SSH)
+
+on:
+  workflow_dispatch:
+    inputs:
+      ssh_host:
+        description: "Хост (IP или DNS)"
+        required: true
+        type: string
+      ssh_user:
+        description: "Пользователь SSH"
+        required: true
+        default: "ubuntu"
+        type: string
+      ssh_port:
+        description: "Порт SSH"
+        required: false
+        default: "22"
+        type: string
+      remote_path:
+        description: "Абсолютный путь с docker-compose.full.yml и .env"
+        required: true
+        default: "/home/ubuntu/control-habits-deploy"
+        type: string
+      image_tag:
+        description: "Тег образов api/bot в ghcr (v0.2.0 или latest)"
+        required: true
+        type: string
+
+concurrency:
+  group: deploy-stack-ssh-${{ github.event.inputs.ssh_host }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Pull, up, миграции
+        uses: appleboy/ssh-action@v1.2.5
+        env:
+          GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+        with:
+          host: ${{ inputs.ssh_host }}
+          username: ${{ inputs.ssh_user }}
+          port: ${{ inputs.ssh_port }}
+          key: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
+          envs: GHCR_USERNAME,GHCR_TOKEN
+          script_stop: true
+          script: |
+            set -euo pipefail
+            if ! command -v docker >/dev/null 2>&1; then
+              echo "::error::На хосте нет docker в PATH"
+              exit 1
+            fi
+            if ! command -v docker-compose >/dev/null 2>&1; then
+              echo "::error::На хосте нет docker-compose в PATH"
+              exit 1
+            fi
+            DEPLOY_DIR="${{ inputs.remote_path }}"
+            if [ ! -f "$DEPLOY_DIR/docker-compose.full.yml" ] || [ ! -f "$DEPLOY_DIR/.env" ]; then
+              echo "::error::Нет docker-compose.full.yml или .env в $DEPLOY_DIR. Сначала запустите workflow «Первичный деплой на хост (SSH)»."
+              exit 1
+            fi
+            cd "$DEPLOY_DIR"
+            if [ -n "${GHCR_TOKEN:-}" ]; then
+              if [ -z "${GHCR_USERNAME:-}" ]; then
+                echo "::error::Задан GHCR_TOKEN, но не задан GHCR_USERNAME в секретах репозитория"
+                exit 1
+              fi
+              printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
+            fi
+            export COMPOSE_IMAGE_TAG="${{ inputs.image_tag }}"
+            docker-compose -f docker-compose.full.yml pull
+            docker-compose -f docker-compose.full.yml up -d
+            docker-compose -f docker-compose.full.yml run --rm api uv run alembic upgrade head
+            docker-compose -f docker-compose.full.yml up -d api bot

@@ -1,0 +1,50 @@
+# Полный стек на одном хосте: API, бот, PostgreSQL в контейнере (образы из ghcr.io).
+# В .env: IMAGE_OWNER, COMPOSE_IMAGE_TAG, BOT_TOKEN; при смене пароля БД — и DATABASE_URL, и POSTGRES_*.
+# Запуск: docker-compose -f docker-compose.full.yml up -d
+# Миграции: docker-compose -f docker-compose.full.yml run --rm api uv run alembic upgrade head
+
+services:
+  api:
+    image: ghcr.io/${IMAGE_OWNER}/control-habits-api:${COMPOSE_IMAGE_TAG:-latest}
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://control_habits:control_habits@db:5432/control_habits}
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy
+
+  bot:
+    image: ghcr.io/${IMAGE_OWNER}/control-habits-bot:${COMPOSE_IMAGE_TAG:-latest}
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://control_habits:control_habits@db:5432/control_habits}
+      BOT_TOKEN: ${BOT_TOKEN}
+      WEB_APP_URL: ${WEB_APP_URL:-}
+      BOT_USERNAME: ${BOT_USERNAME:-}
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-control_habits}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-control_habits}
+      POSTGRES_DB: ${POSTGRES_DB:-control_habits}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-control_habits} -d ${POSTGRES_DB:-control_habits}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  pgdata:

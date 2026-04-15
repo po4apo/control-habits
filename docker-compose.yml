@@ -1,7 +1,7 @@
 # Control Habits: API и бот (опционально — PostgreSQL в контейнере).
 # Секреты задаются через .env или переменные окружения (не коммитить .env с прод-данными).
 # Образы по умолчанию собираются локально; для прода задать image с тегом из ghcr.io.
-# Прод с внешней БД: задать DATABASE_URL и запускать только api и bot: docker compose up api bot.
+# Прод с внешней БД: задать DATABASE_URL и запускать только api и bot: docker-compose up api bot.
 
 services:
   api:

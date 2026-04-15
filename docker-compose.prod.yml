@@ -1,6 +1,6 @@
 # Прод: только API и бот (БД внешняя).
 # В .env задать: IMAGE_OWNER (GitHub org/user), COMPOSE_IMAGE_TAG (например v0.1.0), DATABASE_URL, BOT_TOKEN.
-# Запуск: docker compose -f docker-compose.prod.yml up -d
+# Запуск: docker-compose -f docker-compose.prod.yml up -d
 
 services:
   api:
